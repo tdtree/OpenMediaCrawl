@@ -3,13 +3,14 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** 包根目录：从本文件向上找 name 为 catbus-cli 的 package.json（src/、dist/ 或其他编译输出目录都适用）。 */
+/** 包根目录：从本文件向上找 OpenMediaCrawl/catbus 的 package.json。 */
 export const PACKAGE_ROOT = findRoot(dirname(fileURLToPath(import.meta.url)))
 
 function findRoot(dir: string): string {
   for (let d = dir; ; d = dirname(d)) {
     try {
-      if (JSON.parse(readFileSync(join(d, 'package.json'), 'utf8')).name === 'catbus-cli') return d
+      const name = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8')).name
+      if (name === 'openmediacrawl' || name === 'catbus-cli') return d
     } catch {}
     if (dirname(d) === d) return resolve(dir, '../..')
   }

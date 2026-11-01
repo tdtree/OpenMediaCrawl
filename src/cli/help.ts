@@ -55,6 +55,9 @@ export function rootHelp(): string {
     '',
     '全局命令:',
     table([
+      ['crawl', '批量采集任务（OpenMediaCrawl）'],
+      ['wordcloud', '从评论生成词云 PNG'],
+      ['ui', '启动本地 Web UI'],
       ['platforms [platform]', '能力矩阵：平台 × 端 × 命令的状态'],
       ['doctor', '检查运行环境'],
       ['auth list', '所有平台、所有端的账号'],

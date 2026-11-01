@@ -43,6 +43,12 @@ function printHelp(text: string): number {
 export async function run(argv: string[]): Promise<number> {
   const out = new Output()
   try {
+    // OpenMediaCrawl keeps the original catbus grammar intact while adding a
+    // separate batch-crawl command with its own option vocabulary.
+    if (argv[0] === 'crawl' || argv[0] === 'wordcloud' || argv[0] === 'ui') {
+      const { runOpenMediaCommand } = await import('../crawl/cli.js')
+      return await runOpenMediaCommand(argv)
+    }
     const parsed = parseArgv(argv, collectOptionKinds(PLATFORMS))
     const g = parsed.global
     if (g.output != null) {
