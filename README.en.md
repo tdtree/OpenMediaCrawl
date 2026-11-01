@@ -1,224 +1,126 @@
 <div align="center">
 
-<img src="assets/hero.svg" width="100%" alt="catbus — All aboard, every platform.">
+# OpenMediaCrawl
 
-<br>
+**MIT-licensed, commercial-friendly batch crawler for Chinese & global social platforms**<br>
+Xiaohongshu (RedNote) · Douyin · Kuaishou · Bilibili · Weibo · TikTok · X — keyword search, post details, creator pages, comments & replies, media download, resumable jobs, word clouds, web UI
 
-**One command. Eleven platforms.**<br>
-RedNote (Xiaohongshu) · Douyin · TikTok · Bilibili · Kuaishou · Weibo · Xianyu · Taobao · JD.com · X · 12306
-<br>
-<sub>Coming soon: Instagram · YouTube · Facebook · Zhihu · WeChat Official Accounts · Toutiao · Poizon (Dewu) · Pinduoduo · Meituan · Dianping</sub>
-
-<br>
-
-[![npm](https://img.shields.io/npm/v/catbus-cli?style=for-the-badge&logo=npm&color=CB3837)](https://www.npmjs.com/package/catbus-cli)
+[![GitHub stars](https://img.shields.io/github/stars/Tommyapi/OpenMediaCrawl?style=for-the-badge&logo=github&color=F5C518)](https://github.com/Tommyapi/OpenMediaCrawl/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-A6E3A1?style=for-the-badge)](LICENSE)
 [![Node](https://img.shields.io/badge/node-22%20%7C%2024%20%7C%2026-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](tsconfig.json)
-[![Platforms](https://img.shields.io/badge/platforms-11-F38BA8?style=for-the-badge)](docs/platforms/README.md)
-[![Agent Ready](https://img.shields.io/badge/AI%20Agent-ready-CBA6F7?style=for-the-badge)](.claude/skills/catbus/SKILL.md)
 
-[简体中文](README.md) · **English** · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+[简体中文](README.md) · **English**
 
-[Quick start](docs/guide/quick-start.md) · [Capabilities](docs/capabilities.md) · [Platforms](docs/platforms/README.md) · [Examples](docs/examples/README.md) · [For agents](.claude/skills/catbus/SKILL.md)
+### ⭐ If this saves you time, please star the repo — it keeps the project maintained ⭐
 
 </div>
 
-<br>
+---
 
-> Every platform has its own APIs, its own request signing, its own login flow and its own data format. **catbus puts them all on one bus**: one set of commands, one JSON shape, one home for your logins. To switch platforms, you change a single word.
+## Why OpenMediaCrawl
 
-## ❤️ Sponsor
+| | OpenMediaCrawl | MediaCrawler |
+|---|---|---|
+| License | **MIT — personal and commercial use** | Non-commercial learning license |
+| Runtime | **Node.js only** — no Python, no browser | Python + Playwright / local Chrome (CDP) |
+| How it fetches | Plain HTTP + algorithmic signing (via [catbus](https://github.com/cv-cat/catbus)) | Browser automation |
+| Output | JSON / JSONL / CSV (Excel-ready) / SQLite | CSV / JSON / JSONL / Excel / SQLite / MySQL |
+| Resume interrupted jobs | ✅ **in the open-source version** | Paid Pro edition only |
+| Web UI | ✅ `mediacrawl ui` | ✅ |
+| Comment word cloud | ✅ pure Node segmentation | ✅ |
 
-<div align="center">
+> OpenMediaCrawl is an independent clean-room implementation. It contains no code from MediaCrawler.
 
-<a href="https://api.openai-next.com">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/sponsors/vectrust-dark.png">
-    <img src="assets/sponsors/vectrust.png" alt="Vectrust" height="72">
-  </picture>
-</a>
+## Platform support
 
-**Sponsored by [Vectrust](https://api.openai-next.com) @ OpenDev Org & NextRouter Alliance**
+| Platform | Search | Post detail | Creator | Comments | Replies | Media download |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Xiaohongshu `xhs` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Douyin `douyin` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Kuaishou `kuaishou` | ✅ ¹ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Bilibili `bilibili` | ✅ | ✅ | ✅ | ✅ | ✅ ² | ✅ |
+| Weibo `weibo` | ✅ ³ | ✅ | ✅ | ✅ | — | — |
+| TikTok `tiktok` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| X `x` | ✅ | ✅ | ✅ | ✅ | — | ✅ |
 
-<sub>[Want to appear here?](mailto:992822653@qq.com)</sub>
+¹ no sort/filter ² videos, articles and image posts ³ first page only. Full low-level matrix: [docs/capabilities.md](docs/capabilities.md).
 
-</div>
-
-## ✨ What is catbus
-
-catbus (猫巴士) is a command-line tool that drives the web endpoints of 11 major Chinese and global platforms through **one unified syntax**: search, details, comments, users, feeds, downloads, publishing, direct messages, live-stream chat, train tickets and more.
-
-```bash
-catbus xhs      item search 露营 --sort latest
-catbus douyin   item search 露营 --sort latest
-catbus bilibili item search 露营 --sort latest
-catbus x        item search camping --sort latest
-```
-
-Four platforms, four nearly identical commands, and JSON output with **the same structure**. Notes, posts, videos and tweets are all just `item`; searching is always `search`; liking is always `like`. Learn it once, and you can use all 11 platforms.
-
-<p align="center">
-  <img src="assets/platforms.svg" width="100%" alt="10 supported platforms and 10 more in progress">
-</p>
-
-## 🚀 Why catbus
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🧭 Same meaning, same name
-A capability that means the same thing uses **the same command, the same options and the same output** on every platform. Reach for a platform's native term (`note`, `aweme`, `tweet`…) and catbus will tell you which word to use instead.
-
-</td>
-<td width="50%" valign="top">
-
-### 📦 Node is all you need
-No Python, no compiler, no system dependencies. Every native dependency ships prebuilt binaries covering x64 / arm64 on Windows, macOS and Linux (musl included), and all **8 target systems** are smoke-tested one by one in CI.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🤖 Built for AI agents
-stdout carries nothing but JSON, exit codes are stable, and errors come with the next command to run. `catbus platforms` prints the complete list of capabilities. Ships with an [agent skill](.claude/skills/catbus/SKILL.md) and [llms.txt](llms.txt).
-
-</td>
-<td valign="top">
-
-### 🔐 Your logins never leave your machine
-QR code, SMS and cookie import are all supported. Credentials are isolated per **platform × endpoint × account** under `~/.catbus/` (0700 / 0600), and you can switch between accounts at any time. No data is collected or uploaded, and there is no telemetry.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🧪 Byte-for-byte faithful to upstream
-The URL, header order, cookies, body and signature of every request are **compared byte for byte** against the upstream implementation, with randomness and the clock pinned. 560+ golden files and 940+ offline tests guard every change.
-
-</td>
-<td valign="top">
-
-### 🛡️ A browser-grade network stack
-TLS / HTTP2 fingerprints that match real Chrome, upstream signing JS running unmodified in a sandbox, and slider and click-to-select CAPTCHAs solved automatically with local ONNX and OpenCV.
-
-</td>
-</tr>
-</table>
-
-## 📊 By the numbers
-
-<div align="center">
-
-| 🚌 Platforms | ⌨️ Implemented commands | 🧪 Golden files | ✅ Offline tests | 💻 Target systems |
-|:---:|:---:|:---:|:---:|:---:|
-| **11** | **300+** | **560+** | **960+** | **8** |
-
-</div>
-
-## 🏗️ Architecture
-
-<p align="center">
-  <img src="assets/architecture.svg" width="100%" alt="catbus architecture">
-</p>
-
-- **One registry drives everything**: command parsing, the four levels of `--help`, `catbus platforms` and the [capability matrix](docs/capabilities.md) are all generated from the same registry, so they can never contradict each other.
-- **One platform, one set of files**: `client` handles sessions and signing, `api` maps one-to-one onto upstream methods, `normalize` turns raw data into the unified types, and `resolve` lets IDs, links, share short links and `me` all work as arguments.
-- **Extensible**: the spec reserves room for app / pc endpoints; non-JS upstreams will plug in through the provider protocol.
-
-## 🤖 Built for AI agents
-
-catbus was designed from day one to be called by programs:
+## Quick start
 
 ```bash
-catbus platforms douyin | jq '.data.commands[] | select(.status=="implemented") | .resource + " " + .action'
+git clone https://github.com/Tommyapi/OpenMediaCrawl.git
+cd OpenMediaCrawl
+npm ci && npm run build && npm link     # makes the `mediacrawl` command available
+
+mediacrawl doctor
+mediacrawl xhs auth login                # QR-code login, session stays on your machine
 ```
 
-- **Self-describing**: the login requirements, implementation status and upstream support of every platform and every command are one command away.
-- **Predictable**: success and failure share the same envelope, `{ ok, data, page, error }`; `error.hint` spells out the next command to run.
-- **Chainable**: every output object carries an `id` and a `url`, so one command's result can be fed straight into the next.
-- **Well-behaved**: dangerous operations require an explicit `-y`, posts can be published as visible only to you, and risk control is reported plainly as `RISK_CONTROL` — never silently retried.
+Requires Node.js 22.22+ / 24.15+ / 26+ on Windows, macOS or Linux.
 
-Install the catbus skill into Claude Code, Cursor, Codex and other agents with one command:
+## Batch crawling
 
 ```bash
-npx skills add cv-cat/catbus
+# 50 posts per keyword, with comments and replies, saved as Excel-ready CSV
+mediacrawl crawl --platform xhs --type search --keywords "camping,hiking" --max-items 50 \
+  --comments --sub-comments --save csv --out ./data
+
+# specific posts + download images/videos, saved to SQLite
+mediacrawl crawl --platform bilibili --type detail --ids "BV1xx411c7mD" --media --save sqlite
+
+# a creator's profile and posts
+mediacrawl crawl --platform tiktok --type creator --creators "https://www.tiktok.com/@someone" --comments
 ```
 
-The skill loads on demand: a one-page overview, plus [sub-files](.claude/skills/catbus/SKILL.md) that are read only when a task touches a given platform or kind of work (collecting, publishing, live & DMs, troubleshooting). Safety rules are built in — logins stay with you, writes need confirmation, posts default to private, and it stops on risk control.
+Options: `--keywords` `--ids` `--creators` (comma-separated IDs or URLs), `--max-items 50`, `--sort latest`, `--comments`, `--sub-comments`, `--max-comments 20`, `--media`, `--save json|jsonl|csv|sqlite`, `--out ./data`, `--sleep 2-5`, `--config crawl.yaml`, `--quiet`. Run `mediacrawl crawl --help` for details.
 
-## ⚡ On board in 30 seconds
+- **Resumable**: progress lives in `<out>/.crawl-state-<platform>-<type>.json`; re-run the same command and saved posts/comments are skipped.
+- **Stops on risk control**: on expired login or captcha the job stops immediately with a clear message instead of hammering the platform.
+- **Config files**: any option can come from YAML/JSON; command-line flags win.
+
+## Word cloud & web UI
 
 ```bash
-npm i -g catbus-cli
-
-catbus doctor                 # check your environment
-catbus bilibili auth login    # log in by scanning a QR code
-catbus bilibili item search 猫 --limit 20
+mediacrawl wordcloud --in ./data/xhs/search_comment_2026-11-01.jsonl --out cloud.png
+mediacrawl ui --port 8080        # http://127.0.0.1:8080
 ```
 
-You can also use [Docker](docs/guide/docker.md) or install from source; see [Quick start](docs/guide/quick-start.md) for the full steps.
+<p align="center"><img src="docs/assets/wordcloud-demo.png" width="80%" alt="word cloud example"></p>
 
-## 📚 Documentation
+## Single commands & AI agents
 
-The guides below are in Chinese.
+Every underlying capability is also a one-shot command with a uniform JSON envelope:
 
-| | |
-|---|---|
-| 🚀 [Quick start](docs/guide/quick-start.md) | From installation to your first data export |
-| 🔑 [Login](docs/guide/login.md) · ⚙️ [Configuration](docs/guide/configuration.md) · 🐳 [Docker](docs/guide/docker.md) | QR code / cookies, multiple accounts, proxies, containers |
-| 📤 [Output and errors](docs/guide/output.md) | Envelope, normalized types, pagination, exit codes |
-| 🧭 [Platform guides](docs/platforms/README.md) · 🗂️ [Capability matrix](docs/capabilities.md) | What each platform supports and how to pass arguments |
-| 🧪 [Example scripts](docs/examples/README.md) | Cross-platform search, exporting comments, backing up posts, recording live chat |
-| 📐 [AGENTS.md](AGENTS.md) | The catbus spec itself |
-| ❓ [FAQ](docs/guide/faq.md) | Why log in? What to do about risk control… |
+```bash
+mediacrawl xhs item search camping --sort latest --limit 20
+mediacrawl douyin comment list https://www.douyin.com/video/7xxxxxxxx --limit 50
+```
 
-## 🤝 Contributing
+(The upstream `catbus` command name keeps working.)
 
-Issues and PRs are welcome — new platforms, new commands, fixes for platform API changes, documentation improvements, all of it. Before you start, please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) (spec first; every request needs a golden test). Please report security issues privately as described in [SECURITY.md](.github/SECURITY.md).
+## Responsible use
 
-## 📈 Star history
+Follow each platform's terms of service and the data-protection laws that apply to you; keep request rates low and collect only what you need. This project provides no accounts and does not bypass human verification for you.
 
-<a href="https://cvcat.site/star-history/svg?repos=cv-cat/catbus&type=Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://cvcat.site/star-history/svg?repos=cv-cat/catbus&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://cvcat.site/star-history/svg?repos=cv-cat/catbus&type=Date" />
-    <img alt="Star History Chart" src="https://cvcat.site/star-history/svg?repos=cv-cat/catbus&type=Date" />
-  </picture>
-</a>
+## Acknowledgements
 
-## 🍔 Community groups
+Platform clients and signing come from [cv-cat/catbus](https://github.com/cv-cat/catbus) (MIT) and its upstream repos. OpenMediaCrawl adds batch jobs, resume, multi-format storage, bulk media download, word clouds and the web UI.
 
-If you're into scraping and AI agents, come join the group chats (in Chinese).
+## Star History
 
-If a group is full or a QR code has expired, open an issue or let the author know on WeChat / QQ.
+[![Star History Chart](https://api.star-history.com/svg?repos=Tommyapi/OpenMediaCrawl&type=Date)](https://star-history.com/#Tommyapi/OpenMediaCrawl&Date)
 
-| group-1 | group-2 | group-3 | group-4 (2,000-member QQ group) |
-|:--:|:--:|:--:|:--:|
-| <img width="280" alt="group1" src="https://cvcat.site/assets/group1.jpg" /> | <img width="280" alt="group2" src="https://cvcat.site/assets/group2.jpg" /> | <img width="280" alt="group3" src="https://cvcat.site/assets/group3.jpg" /> | <img width="280" alt="group4" src="https://cvcat.site/assets/group4.jpg" /> |
+## Support
 
-<details>
-<summary><b>⚠️ Disclaimer</b></summary>
+If this project helps you, please give it a ⭐ — donations are welcome too (send each coin on the matching network; wrong-network transfers cannot be recovered):
 
-<br>
+| Network | Coin | Address |
+|---|---|---|
+| TRON (TRC20) | USDT | `TNGdTwE6opH6rmUyoG1JUR7FSyEb4k273R` |
+| Ethereum / BSC (BEP20) / Polygon / Arbitrum / Base | USDT / ETH | `0x59c43144a862b351fa1086ae842d1327c9d91613` |
+| Bitcoin | BTC | `1RS6tWXHregLfEsiPzVUCUBuhgDg5uTSV` |
+| Solana | USDT | `HZguEXfTtLChNdJTxAYCbcGscaqikz8JYrEpUhEyeVd9` |
 
-- This project is intended solely for learning and research. Do not use it for commercial purposes or for any unlawful purpose.
-- When using it, comply with each platform's user agreement and terms of service, as well as the laws and regulations of your jurisdiction. Do not collect or disseminate other people's private data, and do not place excessive request load on the platforms.
-- Automated operations may trigger the platforms' risk controls, resulting in CAPTCHAs, rate limiting or even account bans. Users bear sole responsibility for any and all consequences arising from their use of this project.
-- This project is not affiliated with any of the platforms mentioned above, nor has it been authorized or endorsed by them. All platform names and trademarks are the property of their respective owners.
+## License
 
-</details>
-
-## 📄 License
-
-[MIT](LICENSE) © 2026 [cv-cat](https://github.com/cv-cat)
-
-<div align="center">
-<br>
-<img src="assets/logo.svg" width="64" alt="catbus">
-<br>
-<sub>All aboard, every platform. · 上车，开往任何平台</sub>
-</div>
+[MIT](LICENSE) © 2026 cv-cat (original catbus code) · 2026 tommyapi (OpenMediaCrawl additions)

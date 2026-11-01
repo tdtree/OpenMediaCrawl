@@ -4,6 +4,13 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.0] - 2026-11-01
+
+### Added
+
+- OpenMediaCrawl 批量采集命令、断点续采、JSON/JSONL/CSV/SQLite 存储、媒体下载、评论词云和本地 Web UI。
+- `mediacrawl` 主命令与 `catbus` 兼容入口并存；原有 catbus 平台命令保持可用。
+
 ## [Unreleased]
 
 ### Added
