@@ -7,7 +7,7 @@
 | 0.1.x | 是 |
 | < 0.1 | 否 |
 
-catbus 目前处于 0.1.x，安全修复只发布在最新版本里：请用 `npm i -g catbus-cli@latest` 升级；从源码安装的用户请跟随 `master` 分支的最新提交。
+catbus 目前处于 0.1.x，安全修复只发布在最新版本里：请 `git pull` 后重新 `npm ci && npm run build`；从源码安装的用户请跟随 `main` 分支的最新提交。
 
 ## 报告漏洞
 
@@ -15,7 +15,7 @@ catbus 目前处于 0.1.x，安全修复只发布在最新版本里：请用 `np
 
 请通过 GitHub Security Advisories 私下报告：
 
-**https://github.com/cv-cat/catbus/security/advisories/new**
+**https://github.com/Tommyapi/OpenMediaCrawl/security/advisories/new**
 
 报告里请尽量写清楚：
 

@@ -20,7 +20,7 @@
 ## 2. 拉代码与构建
 
 ```bash
-git clone https://github.com/cv-cat/catbus.git
+git clone https://github.com/Tommyapi/OpenMediaCrawl.git
 cd catbus
 npm ci
 npm run assets:jd      # 取回京东验证码模型（约 81 MB），放到 packages/assets-jd/models/

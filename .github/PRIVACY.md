@@ -106,4 +106,4 @@ catbus 以 MIT 许可证开源，你可以审阅全部源码：https://github.co
 
 ## 联系
 
-隐私相关的问题请在 [GitHub Issues](https://github.com/cv-cat/catbus/issues) 提出。涉及安全漏洞的，请按 [SECURITY.md](SECURITY.md) 私下报告。
+隐私相关的问题请在 [GitHub Issues](https://github.com/Tommyapi/OpenMediaCrawl/issues) 提出。涉及安全漏洞的，请按 [SECURITY.md](SECURITY.md) 私下报告。
