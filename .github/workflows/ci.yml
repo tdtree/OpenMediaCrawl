@@ -99,11 +99,11 @@ jobs:
         if: ${{ !matrix.alpine }}
         shell: bash
         run: |
-          npm install -g ./cv-cat-catbus-assets-jd-*.tgz ./cv-cat-catbus-assets-ocr-*.tgz ./catbus-cli-*.tgz
+          npm install -g ./cv-cat-catbus-assets-jd-*.tgz ./cv-cat-catbus-assets-ocr-*.tgz ./openmediacrawl-*.tgz
           node scripts/smoke.mjs
       # Alpine 容器里跑不了 JS action（arm64 尤其如此），直接用 docker run
       - name: install & smoke (alpine)
         if: ${{ matrix.alpine }}
         run: >-
           docker run --rm -v "$PWD:/w" -w /w node:${{ matrix.node }}-alpine
-          sh -c 'npm install -g ./cv-cat-catbus-assets-jd-*.tgz ./cv-cat-catbus-assets-ocr-*.tgz ./catbus-cli-*.tgz && node scripts/smoke.mjs'
+          sh -c 'npm install -g ./cv-cat-catbus-assets-jd-*.tgz ./cv-cat-catbus-assets-ocr-*.tgz ./openmediacrawl-*.tgz && node scripts/smoke.mjs'

@@ -27,4 +27,4 @@ const body = section
   .replace(/\]\((?!https?:|#)([^)]+)\)/g, (_, path) => `](${BLOB}${path})`)
   .trim()
 
-process.stdout.write(`\`\`\`bash\nnpm i -g catbus-cli@${version}\n\`\`\`\n\n${body}\n\n完整的更新日志见 [CHANGELOG.md](${BLOB}CHANGELOG.md)。\n`)
+process.stdout.write(`\`\`\`bash\ngit clone https://github.com/Tommyapi/OpenMediaCrawl.git && cd OpenMediaCrawl && git checkout v${version} && npm ci && npm run build && npm link\n\`\`\`\n\n${body}\n\n完整的更新日志见 [CHANGELOG.md](${BLOB}CHANGELOG.md)。\n`)

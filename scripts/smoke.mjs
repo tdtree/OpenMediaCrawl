@@ -75,6 +75,18 @@ check('--help', () => {
   assert(r.code === 0 && r.stdout.includes('catbus <platform> <resource> <action>'), r.stdout + r.stderr)
 })
 
+check('mediacrawl crawl --help', () => {
+  const r = spawnSync('mediacrawl', ['crawl', '--help'], { encoding: 'utf8', shell: process.platform === 'win32', env: { ...process.env, CATBUS_HOME: home } })
+  assert(r.status === 0 && r.stdout.includes('OpenMediaCrawl') && r.stdout.includes('--sub-comments'), (r.stdout ?? '') + (r.stderr ?? ''))
+})
+
+check('mediacrawl crawl 未登录 → AUTH_REQUIRED（退出码 3），不重试', () => {
+  const r = spawnSync('mediacrawl', ['crawl', '--platform', 'xhs', '--type', 'detail', '--ids', 'x', '--sleep', '0', '--out', join(home, 'data')], { encoding: 'utf8', shell: process.platform === 'win32', env: { ...process.env, CATBUS_HOME: home } })
+  let env = null
+  try { env = JSON.parse(r.stdout) } catch {}
+  assert(r.status === 3 && env?.error?.code === 'AUTH_REQUIRED', (r.stdout ?? '') + (r.stderr ?? ''))
+})
+
 check('planned 端 → NOT_IMPLEMENTED（退出码 4）', () => {
   const r = catbus('xianyu', 'item', 'get', 'x', '-e', 'app')
   assert(r.code === 4 && r.env?.error?.code === 'NOT_IMPLEMENTED', r.stdout + r.stderr)
