@@ -49,9 +49,10 @@ const HTML = String.raw`
   <div class="sec-head"><h2>发送参数与数据</h2><span class="sub">群发默认按这里的间隔和上限执行；上限只影响本地，平台侧仍可能更严。</span></div>
   <div class="grid2">
     <form class="card" id="accountSetForm">
-      <h3>发送参数</h3>
-      <div class="grid3" style="margin-top:10px">
-        <label class="field"><span>单日私信上限</span><input id="accountCap" type="number" min="1" max="200" step="1"></label>
+      <h3>群发参数 <span class="tiny" id="accountSetScope">（admin 统一设置，所有账号共用）</span></h3>
+      <div class="grid2" style="margin-top:10px">
+        <label class="field"><span>单日上限</span><input id="accountCap" type="number" min="1" max="200" step="1"></label>
+        <label class="field"><span>一次最多（条）</span><input id="accountBatch" type="number" min="1" max="200" step="1"></label>
         <label class="field"><span>最小间隔（秒）</span><input id="accountMin" type="number" min="5" step="1"></label>
         <label class="field"><span>最大间隔（秒）</span><input id="accountMax" type="number" min="5" step="1"></label>
       </div>
@@ -59,7 +60,7 @@ const HTML = String.raw`
         <button class="primary" id="accountSetSave" type="submit">保存</button>
         <span class="tiny" id="accountSetMsg"></span>
       </div>
-      <p class="hint">单日上限 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。</p>
+      <p class="hint" id="accountSetHint">单日上限与一次最多 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。非 admin 只能查看。</p>
     </form>
     <div class="card account-danger">
       <h3>危险区</h3>
@@ -379,12 +380,21 @@ async function accountHealth(btn){
 }
 
 /* ---------------------------------------------------------------- ② 发送参数 / 清空 */
+/* 群发参数只有 admin 能改，其他人只读。 */
+function accountApplySettingsScope(isAdmin){
+  ['#accountCap','#accountBatch','#accountMin','#accountMax'].forEach(function(sel){var el=$(sel);if(el)el.disabled=!isAdmin});
+  var btn=$('#accountSetSave');if(btn)btn.hidden=!isAdmin;
+  var hint=$('#accountSetHint');if(hint)hint.textContent=isAdmin?'单日上限与一次最多 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。改完对所有账号生效。':'群发参数由 admin 在「账号与设置」或「用户管理」里统一设置，这里只能查看。';
+}
+
 async function accountLoadSettings(){
   try{
     var s=await api('/api/settings');
     $('#accountCap').value=s.dailyCap;
+    if($('#accountBatch'))$('#accountBatch').value=s.batchMax;
     $('#accountMin').value=s.minSeconds;
     $('#accountMax').value=s.maxSeconds;
+    accountApplySettingsScope(!!(omc.state.me&&omc.state.me.role==='admin'));
   }catch(e){
     $('#accountSetMsg').textContent='读取失败：'+e.message;
   }
@@ -848,11 +858,13 @@ $('#accountSetForm').onsubmit=async function(ev){
   accountBtn(btn,true,'保存中…');
   $('#accountSetMsg').textContent='保存中…';
   try{
-    var s=await post('/api/settings',{dailyCap:cap,minSeconds:min,maxSeconds:max});
+    var batch=Number(($('#accountBatch')||{}).value||0);
+    var s=await post('/api/settings',{dailyCap:cap,batchMax:batch,minSeconds:min,maxSeconds:max});
     $('#accountCap').value=s.dailyCap;
+    if($('#accountBatch'))$('#accountBatch').value=s.batchMax;
     $('#accountMin').value=s.minSeconds;
     $('#accountMax').value=s.maxSeconds;
-    $('#accountSetMsg').textContent='已保存：单日上限 '+s.dailyCap+'，间隔 '+s.minSeconds+'-'+s.maxSeconds+' 秒';
+    $('#accountSetMsg').textContent='已保存：单日上限 '+s.dailyCap+'，一次最多 '+s.batchMax+' 条，间隔 '+s.minSeconds+'-'+s.maxSeconds+' 秒';
   }catch(e){
     $('#accountSetMsg').textContent='保存失败：'+e.message;
   }finally{accountBtn(btn,false)}

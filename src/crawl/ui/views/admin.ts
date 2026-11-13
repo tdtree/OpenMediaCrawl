@@ -241,6 +241,23 @@ export const admin: View = {
   <div class="admin-sum" id="adminUsageSum"></div>
 </section>
 
+<section class="sec">
+  <div class="sec-head"><h2>群发参数</h2><span class="sub">单日上限、一次最多、发送间隔；所有账号共用，采集页的候选群发按这里的值执行。</span></div>
+  <form class="card" id="adminSendForm">
+    <div class="grid2" style="margin-top:2px">
+      <label class="field"><span>单日上限（条）</span><input id="adminSendCap" type="number" min="1" max="200" step="1"></label>
+      <label class="field"><span>一次最多（条）</span><input id="adminSendBatch" type="number" min="1" max="200" step="1"></label>
+      <label class="field"><span>最小间隔（秒）</span><input id="adminSendMin" type="number" min="5" step="1"></label>
+      <label class="field"><span>最大间隔（秒）</span><input id="adminSendMax" type="number" min="5" step="1"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="adminSendSave" type="submit">保存</button>
+      <span class="tiny" id="adminSendMsg"></span>
+    </div>
+    <p class="hint">单日上限与一次最多 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。默认 25 条/天、一次 50 条、30-90 秒。</p>
+  </form>
+</section>
+
 <section class="sec admin-clean">
   <div class="sec-head"><h2>数据清理</h2><span class="sub">删掉超过保留期、且从未被任何筛选词命中的评论正文，腾出磁盘空间。</span></div>
   <div class="card admin-bar">
@@ -1174,7 +1191,36 @@ export const admin: View = {
 
   adminBind();
   adminCleanBind();
+
+/* ---------------------------------------------------------------- 群发参数 */
+async function adminSendLoad(){
+  try{
+    var s=await api('/api/settings');
+    $('#adminSendCap').value=s.dailyCap;
+    $('#adminSendBatch').value=s.batchMax;
+    $('#adminSendMin').value=s.minSeconds;
+    $('#adminSendMax').value=s.maxSeconds;
+  }catch(e){
+    var msg=$('#adminSendMsg');if(msg)msg.textContent='读取失败：'+e.message;
+  }
+}
+var adminSendForm=$('#adminSendForm');
+if(adminSendForm)adminSendForm.addEventListener('submit',async function(ev){
+  ev.preventDefault();
+  var cap=Number($('#adminSendCap').value),batch=Number($('#adminSendBatch').value),min=Number($('#adminSendMin').value),max=Number($('#adminSendMax').value);
+  if(![cap,batch,min,max].every(function(n){return isFinite(n)&&n>0})){$('#adminSendMsg').textContent='四个数字都要填';return}
+  var btn=$('#adminSendSave');btn.disabled=true;$('#adminSendMsg').textContent='保存中…';
+  try{
+    var s=await post('/api/settings',{dailyCap:cap,batchMax:batch,minSeconds:min,maxSeconds:max});
+    $('#adminSendCap').value=s.dailyCap;$('#adminSendBatch').value=s.batchMax;$('#adminSendMin').value=s.minSeconds;$('#adminSendMax').value=s.maxSeconds;
+    $('#adminSendMsg').textContent='已保存：单日 '+s.dailyCap+' 条，一次最多 '+s.batchMax+' 条，间隔 '+s.minSeconds+'-'+s.maxSeconds+' 秒';
+    toast('群发参数已更新');
+  }catch(e){$('#adminSendMsg').textContent='保存失败：'+e.message}
+  finally{btn.disabled=false}
+});
+
   omc.onShow('admin',adminLoad);
+  omc.onShow('admin',adminSendLoad);
   omc.onShow('admin',adminCleanLoad);
 })();
 `,

@@ -125,8 +125,8 @@ export const reach: View = {
       <form id="reachCampForm" class="reach-form">
         <label class="field"><span>类型</span>
           <select id="reachCampType">
+            <option value="dm" selected>统一私信</option>
             <option value="reply">统一回复（回复他们那条评论）</option>
-            <option value="dm">统一私信</option>
           </select>
         </label>
         <label class="field"><span>文案</span>
@@ -142,7 +142,7 @@ export const reach: View = {
           <button class="danger" id="reachCampStop" type="button" hidden>停止</button>
           <span class="tiny" id="reachCampMsg"></span>
         </div>
-        <p class="hint">一次最多 50 条；服务端会跳过今天已经发过的和超上限的，遇到风控或登录失效会自动停。单日上限在「账号与设置」里改。</p>
+        <p class="hint" id="reachCampHint">服务端会跳过今天已经发过的和超上限的，遇到风控或登录失效会自动停。单日上限、一次最多和间隔由 admin 在「账号与设置」里统一设置。</p>
         <pre class="reach-pre mono" id="reachCampLog" hidden></pre>
       </form>
     </div>

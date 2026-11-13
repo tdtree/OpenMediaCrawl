@@ -602,6 +602,31 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('send config is global, defaults to 25/day and 50 per batch, admin-only write', async () => {
+    const { ui, base } = await uiServer('omc-ui-send-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      const first = await (await fetch(`${base}/api/settings`, { headers: { cookie } })).json() as Record<string, number>
+      expect(first).toMatchObject({ dailyCap: 25, batchMax: 50, minSeconds: 30, maxSeconds: 90 })
+
+      const saved = await (await fetch(`${base}/api/settings`, { method: 'POST', headers: auth, body: JSON.stringify({ dailyCap: 40, batchMax: 80, minSeconds: 40, maxSeconds: 120 }) })).json() as Record<string, number>
+      expect(saved).toMatchObject({ dailyCap: 40, batchMax: 80, minSeconds: 40, maxSeconds: 120 })
+
+      // 普通账号也能读到全局值（只读），写入被拒
+      await fetch(`${base}/api/users`, { method: 'POST', headers: auth, body: JSON.stringify({ username: '王五', password: 'pass12345', role: 'user' }) })
+      const users = await (await fetch(`${base}/api/users`, { headers: { cookie } })).json() as { users: Array<{ username: string; status: string }> }
+      const wang = users.users.find((one) => one.username === '王五')!
+      await fetch(`${base}/api/users/${encodeURIComponent(wang.username)}/status`, { method: 'POST', headers: auth, body: JSON.stringify({ status: 'active' }) })
+      const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: '王五', password: 'pass12345' }) })
+      const userCookie = String(login.headers.get('set-cookie') ?? '').split(';')[0]!
+      const mine = await (await fetch(`${base}/api/settings`, { headers: { cookie: userCookie } })).json() as Record<string, number>
+      expect(mine.dailyCap).toBe(40)
+      const denied = await fetch(`${base}/api/settings`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: userCookie }, body: JSON.stringify({ dailyCap: 999 }) })
+      expect(denied.status).toBe(403)
+    } finally { await ui.close() }
+  })
+
   it('admin cleanup previews and removes old comments that no filter matched', async () => {
     const { out, ui, base } = await uiServer('omc-ui-clean-')
     try {

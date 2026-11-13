@@ -18,6 +18,7 @@ import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
 import { loadLexicon, saveLexicon, sanitizeLexicon } from './lexicon.js'
 import { appendChat, hasMessage, listChat, listThreads } from './chat.js'
 import { addFilterTerms, applyCleanup, planCleanup } from './cleanup.js'
+import { DEFAULT_SEND_CONFIG, loadSendConfig, saveSendConfig } from './send-config.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
@@ -201,18 +202,14 @@ export async function startUiServer(options: { port?: number; host?: string; out
   const userRoot = (username: string) => join(base, 'users', username)
   const userHome = (username: string) => join(userRoot(username), '.catbus')
 
-  /** 每个用户的发送/线索参数（缺省值就是护栏默认值）。 */
-  interface UserSettings { dailyCap: number; minSeconds: number; maxSeconds: number }
-  async function loadSettings(username: string): Promise<UserSettings> {
-    const defaults: UserSettings = { dailyCap: DEFAULT_DAILY_CAP, minSeconds: 30, maxSeconds: 90 }
-    try {
-      const parsed = JSON.parse(await readFile(join(userRoot(username), 'settings.json'), 'utf8')) as Partial<UserSettings>
-      return { ...defaults, ...parsed }
-    } catch { return defaults }
+  /** 群发参数：admin 统一设置，所有账号共用（send-config.json，和 users.json 同目录）。 */
+  interface UserSettings { dailyCap: number; batchMax: number; minSeconds: number; maxSeconds: number }
+  async function loadSettings(_username: string): Promise<UserSettings> {
+    const config = await loadSendConfig()
+    return { dailyCap: config.dailyCap, batchMax: config.batchMax, minSeconds: config.minSeconds, maxSeconds: config.maxSeconds }
   }
-  async function saveSettings(username: string, next: UserSettings): Promise<void> {
-    await mkdir(userRoot(username), { recursive: true })
-    await writeFile(join(userRoot(username), 'settings.json'), JSON.stringify(next, null, 2) + '\n', 'utf8')
+  async function saveSettings(_username: string, next: Partial<UserSettings>): Promise<UserSettings> {
+    return saveSendConfig(next)
   }
 
   const admin = await ensureAdmin()
@@ -689,14 +686,16 @@ export async function startUiServer(options: { port?: number; host?: string; out
     }
     if (url.pathname === '/api/settings' && req.method === 'GET') return json(res, await loadSettings(user.username))
     if (url.pathname === '/api/settings' && req.method === 'POST') {
+      if (user.role !== 'admin') return json(res, { error: '群发参数由 admin 统一设置' }, 403)
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
       const current = await loadSettings(user.username)
-      const dailyCap = Math.min(200, Math.max(1, Number(input.dailyCap ?? current.dailyCap)))
-      const minSeconds = Math.min(3600, Math.max(5, Number(input.minSeconds ?? current.minSeconds)))
-      const maxSeconds = Math.min(7200, Math.max(minSeconds, Number(input.maxSeconds ?? current.maxSeconds)))
-      const next = { dailyCap, minSeconds, maxSeconds }
-      await saveSettings(user.username, next)
+      const next = await saveSettings(user.username, {
+        dailyCap: Number(input.dailyCap ?? current.dailyCap),
+        batchMax: Number(input.batchMax ?? current.batchMax),
+        minSeconds: Number(input.minSeconds ?? current.minSeconds),
+        maxSeconds: Number(input.maxSeconds ?? current.maxSeconds),
+      })
       return json(res, next)
     }
     if (url.pathname === '/api/settings/clear' && req.method === 'POST') {
@@ -863,12 +862,12 @@ export async function startUiServer(options: { port?: number; host?: string; out
         else skipped.other++
       }
       if (!queue.length) return json(res, { error: '没有可发的候选（已发送过或今天到上限）', skipped }, 400)
-      if (queue.length > 50) return json(res, { error: '一次最多 50 条，先清一清候选池' }, 400)
+      if (queue.length > settings.batchMax) return json(res, { error: '一次最多 ' + settings.batchMax + ' 条，先清一清候选池' }, 400)
       const state = newCampaign(type, text, queue.length)
       const controller = new AbortController()
       state.stop = () => controller.abort()
       campaigns.set(state.id, { state, controller })
-      json(res, { id: state.id, total: queue.length, minSeconds, maxSeconds, dailyCap: settings.dailyCap, skipped }, 202)
+      json(res, { id: state.id, total: queue.length, minSeconds, maxSeconds, dailyCap: settings.dailyCap, batchMax: settings.batchMax, skipped }, 202)
       void (async () => {
         const push = (event: CampaignEvent): void => {
           state.history.push(event)

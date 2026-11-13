@@ -8,6 +8,10 @@
 
 ### Added
 
+- 群发参数改为 admin 统一设置（`send-config.json`，和 `users.json` 同目录）：单日上限默认 25、一次最多 50、间隔 30-90 秒；所有账号共用，普通账号只读
+- 「用户管理 → 群发参数」与「账号与设置 → 群发参数」两处可改（仅 admin）；群发接口按一次最多条数校验，护栏默认单日上限 20 → 25
+- 触达页「群发设置」默认类型改为统一私信，私信排在前
+
 - 数据清理：`GET/POST /api/admin/cleanup` 预览并删除「超过 N 天、且从未被任何筛选词命中」的评论正文；筛选词 = 词库过滤词 + 历史用过的（`filter-history.json`）；保留线索、发送记录、会话与断点状态，重爬不重复抓取；缺时间字段的行跳过，删除前留 `.bak`
 - 「用户管理 → 数据清理」面板：7/30/90 天切换、按用户预览、候选体积、输入「确认清理」二次确认、执行结果就地回显；admin 侧栏显示待清理条数徽标
 - Web 控制台镜像：`Dockerfile.web` + `.github/workflows/docker.yml` 推 `ghcr.io/tdtree/openmediacrawl:latest|sha|tag`；`ui` 命令支持 `--host`/`OMC_UI_HOST`，容器内监听 0.0.0.0，数据卷 `/data`

@@ -16,7 +16,7 @@ export interface SentRecord {
 }
 
 export interface CanSendOptions {
-  /** 单日上限，默认 20。按本地日期（User 的时区）切换。 */
+  /** 单日上限，默认 25（admin 可在群发参数里改）。按本地日期切换。 */
   dailyCap?: number
   /** 注入「现在」，测试用；默认 new Date()。 */
   now?: Date
@@ -42,7 +42,7 @@ export interface AccountStatus {
 }
 
 /** 单个平台一天最多发多少条（评论 + 私信合计）。 */
-export const DEFAULT_DAILY_CAP = 20
+export const DEFAULT_DAILY_CAP = 25
 
 /** auth status 子进程默认超时：登录态检测只是读本地凭据，20 秒足够。 */
 const DEFAULT_AUTH_TIMEOUT_MS = 20_000
