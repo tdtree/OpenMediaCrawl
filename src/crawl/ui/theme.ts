@@ -44,6 +44,7 @@ code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .nav-item:hover{background:var(--row-hover)}
 .nav-item[aria-current=page]{background:transparent;color:var(--acc-ink);font-weight:600;box-shadow:inset 2px 0 0 var(--acc)}
 .nav-item .n{margin-left:auto;font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+.nav-n{margin-left:auto;min-width:17px;height:16px;padding:0 4px;border-radius:2px;background:var(--danger);color:#fff;font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
 .side-foot{margin-top:auto;padding-top:var(--s4);border-top:1px solid var(--line);display:flex;flex-direction:column;gap:var(--s2)}
 .side-link{font-size:11px;color:var(--muted);word-break:break-all;line-height:1.35}
 .side-link:hover{color:var(--acc)}

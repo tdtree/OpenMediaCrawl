@@ -75,6 +75,40 @@ export const admin: View = {
 .admin-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s4);margin-top:var(--s3);font-size:var(--fs-xs);color:var(--muted)}
 .admin-sum b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
 
+/* 数据清理：amber 提示 + 汇总行 + 危险区 */
+.admin-clean{--amber-ink:#8a5a00;--amber-soft:#fdf6e5;--amber-line:#e3c88f}
+@media (prefers-color-scheme:dark){.admin-clean{--amber-ink:#f2c983;--amber-soft:#2a2114;--amber-line:#4b3a1a}}
+.admin-f-keep{width:132px}
+.admin-clean-note{display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-top:var(--s3);padding:9px var(--s3) 10px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:var(--fs-sm);line-height:1.55}
+.admin-clean-note b{font-weight:600;font-variant-numeric:tabular-nums}
+.admin-clean-note.is-hit{border-color:var(--amber-line);background:var(--amber-soft);color:var(--amber-ink)}
+.admin-clean-note.is-hit b{color:var(--amber-ink)}
+.admin-clean-note.is-clear{border-color:var(--line);background:var(--ok-soft);color:var(--ok)}
+.admin-clean-note.is-clear b{color:var(--ok)}
+.admin-clean-tbl{min-width:780px}
+.admin-clean-tbl col.admin-q1{width:auto}
+.admin-clean-tbl col.admin-q2{width:96px}
+.admin-clean-tbl col.admin-q3{width:104px}
+.admin-clean-tbl col.admin-q4{width:104px}
+.admin-clean-tbl col.admin-q5{width:132px}
+.admin-clean-tbl col.admin-q6{width:96px}
+.admin-clean-tbl tfoot td{padding:8px 10px;border-top:1px solid var(--line);border-bottom:0;background:var(--card);font-size:var(--fs-xs);color:var(--muted)}
+.admin-clean-tbl tfoot td b{color:var(--fg);font-size:var(--fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
+
+.admin-danger{margin-top:var(--s3);border-color:var(--danger);display:flex;flex-direction:column;gap:var(--s2)}
+.admin-danger-h{display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap}
+.admin-danger-h b{font-size:var(--fs-sm);font-weight:600;letter-spacing:.02em;color:var(--danger)}
+.admin-danger-txt{line-height:1.6}
+.admin-danger-txt b{color:var(--fg);font-weight:600}
+.admin-danger-act{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;margin-top:var(--s1)}
+.admin-danger-msg{font-size:var(--fs-xs);color:var(--muted);min-width:0;word-break:break-word}
+.admin-danger-msg.is-ok{font-size:var(--fs-sm);color:var(--ok);font-weight:600}
+.admin-danger-msg.is-bad{font-size:var(--fs-sm);color:var(--danger)}
+.admin-confirm{display:flex;align-items:flex-end;gap:var(--s2);flex-wrap:wrap;padding-top:var(--s3);border-top:1px dashed var(--line)}
+.admin-confirm .field{width:200px}
+.admin-confirm input{min-height:32px;font-size:var(--fs-sm)}
+.admin-confirm .tiny{flex:1 1 100%;min-width:0;padding-bottom:0;line-height:1.45}
+
 /* 按天明细：行内展开（紧凑四组，不做大卡片） */
 .admin-day-row{cursor:pointer}
 .admin-day-row.is-open td{background:var(--row-hover)}
@@ -121,6 +155,7 @@ export const admin: View = {
 @media(max-width:1100px){
   .admin-tbl-day{min-width:0}
   .admin-tbl-use{min-width:820px}
+  .admin-clean-tbl{min-width:680px}
 }
 @media(max-width:960px){
   .admin-ledger{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -146,6 +181,9 @@ export const admin: View = {
   .admin-dgr-lead>span:nth-child(3){display:none}
   .admin-dgr-sent{grid-template-columns:34px 48px minmax(0,1fr) 52px 42px}
   .admin-dgr-chat{grid-template-columns:34px 42px minmax(0,84px) minmax(0,1fr)}
+  .admin-clean-tbl{min-width:0}
+  .admin-confirm .field{width:100%}
+  .admin-clean-note{padding:8px var(--s2) 9px}
 }
 `,
   html: String.raw`<section class="sec">
@@ -201,12 +239,51 @@ export const admin: View = {
   <div class="sec-head"><h2>账号概览</h2><span class="sub">累计作品、线索、私信与磁盘占用，按账号统计。</span></div>
   <div class="admin-tbl-wrap" id="adminUsageWrap" role="region" aria-label="账号概览"><p class="loading admin-pad">读取中…</p></div>
   <div class="admin-sum" id="adminUsageSum"></div>
+</section>
+
+<section class="sec admin-clean">
+  <div class="sec-head"><h2>数据清理</h2><span class="sub">删掉超过保留期、且从未被任何筛选词命中的评论正文，腾出磁盘空间。</span></div>
+  <div class="card admin-bar">
+    <label class="field admin-f-keep"><span>保留天数</span>
+      <select id="adminCleanDays">
+        <option value="7">7 天</option>
+        <option value="30" selected>30 天</option>
+        <option value="90">90 天</option>
+      </select>
+    </label>
+    <button class="btn ghost" type="button" id="adminCleanPreview">预览</button>
+    <span class="spacer"></span>
+    <span class="tiny admin-stamp" id="adminCleanStamp" role="status" aria-live="polite">—</span>
+  </div>
+
+  <div class="admin-clean-note" id="adminCleanNote" role="status" aria-live="polite" hidden></div>
+  <div class="admin-tbl-wrap" id="adminCleanWrap" role="region" aria-label="可清理评论预览"><p class="loading admin-pad">读取中…</p></div>
+
+  <div class="card admin-danger">
+    <div class="admin-danger-h"><b>危险区</b><span class="tiny">清理后不可撤销</span></div>
+    <p class="sub admin-danger-txt">执行后会删除超过所选天数、且从未被任何筛选词（词库 + 历史用过的词）命中的评论正文，只删原始评论数据行，<b>会保留：线索库、发送记录、会话、断点状态</b>。重跑采集会跳过已删掉的评论，不会重复抓取。</p>
+    <div class="admin-danger-act">
+      <button class="btn danger" type="button" id="adminCleanRun">执行清理</button>
+      <span class="admin-danger-msg" id="adminCleanMsg" role="status" aria-live="polite"></span>
+    </div>
+    <div class="admin-confirm" id="adminCleanConfirm" hidden>
+      <label class="field"><span>输入「确认清理」再执行</span>
+        <input id="adminCleanInput" type="text" autocomplete="off" spellcheck="false" placeholder="确认清理">
+      </label>
+      <button class="btn danger" type="button" id="adminCleanOk" disabled>确认执行清理</button>
+      <button class="btn sm ghost" type="button" id="adminCleanCancel">取消</button>
+      <span class="tiny">这一步会真的删数据：先点「预览」确认条数与体积，再输入「确认清理」。</span>
+    </div>
+  </div>
 </section>`,
   js: String.raw`
 /* ---- view: admin ---- */
 (function(){
   var adminDaysDefault=14;
   var adminState={days:adminDaysDefault,user:'',busy:false,seq:0,activity:null,usage:null,activityErr:'',usageErr:'',stamp:'',open:null,detail:{}};
+  /** 数据清理：独立一套状态，不与上面的统计天数 / 用户筛选联动。 */
+  var adminCleanDefault=30;
+  var adminClean={days:adminCleanDefault,busy:false,run:false,seq:0,data:null,err:'',stamp:'',stage:'idle',msg:'',msgKind:''};
 
   /** 行内展开用到的名字表与条数上限（单日数据可能很长，超出就截断并注明）。 */
   var adminPlatName={xhs:'小红书',douyin:'抖音',kuaishou:'快手',bilibili:'B 站',weibo:'微博',tiktok:'TikTok',x:'X'};
@@ -761,6 +838,216 @@ export const admin: View = {
     if(sum)sum.innerHTML=adminUsageSumHtml(rows);
   }
 
+  /* ---------------------------------------------------------------- 渲染：数据清理 */
+  function adminCleanCount(v){var n=Number(v);return isFinite(n)&&n>0?n:0}
+
+  /** 可清理条数倒序，同数按用户名。 */
+  function adminCleanRows(){
+    var rows=(adminClean.data&&Array.isArray(adminClean.data.users))?adminClean.data.users.slice():[];
+    rows.sort(function(a,b){
+      var ca=adminCleanCount(a&&a.candidates),cb=adminCleanCount(b&&b.candidates);
+      if(ca!==cb)return cb-ca;
+      return String((a&&a.username)||'').localeCompare(String((b&&b.username)||''),'zh-Hans');
+    });
+    return rows;
+  }
+
+  /** 汇总行自己按行重算，接口 totals 与明细不一致时也不自相矛盾。 */
+  function adminCleanTotals(rows){
+    var t={total:0,candidates:0,candidateBytes:0,skipped:0};
+    rows.forEach(function(r){
+      if(!r)return;
+      t.total+=adminCleanCount(r.total);
+      t.candidates+=adminCleanCount(r.candidates);
+      t.candidateBytes+=adminCleanCount(r.candidateBytes);
+      t.skipped+=adminCleanCount(r.skipped);
+    });
+    return t;
+  }
+
+  function adminCleanBytesCell(candidate,whole){
+    var n=adminCleanCount(candidate);
+    if(n<=0)return '<span class="admin-zero">0 KB</span>';
+    return '<span title="评论正文共 '+esc(adminBytes(whole))+'">'+esc(adminBytes(n))+'</span>';
+  }
+
+  /** 顶部提示：有候选给 amber 警示，没有就一行绿字，未加载时整条隐藏。 */
+  function adminCleanNotice(){
+    var note=$('#adminCleanNote');if(!note)return;
+    if(!adminClean.data){note.hidden=true;note.className='admin-clean-note';note.innerHTML='';return}
+    var t=adminClean.data.totals||{};
+    var cand=adminCleanCount(t.candidates);
+    var days=adminCleanCount(adminClean.data.days)||adminClean.days;
+    note.hidden=false;
+    if(cand>0){
+      note.className='admin-clean-note is-hit';
+      note.innerHTML='<b>有 '+num(cand)+' 条评论</b><span>超过 '+days+' 天没有被筛选词命中，占用 '+esc(adminBytes(t.candidateBytes))+'，可清理；只删评论正文，线索与断点记录保留。</span>';
+      return;
+    }
+    note.className='admin-clean-note is-clear';
+    note.innerHTML='<span>暂时没有可清理的评论（超过 '+days+' 天的都还在保留范围内，或都被筛选词命中过）。</span>';
+  }
+
+  function adminCleanTableHtml(rows){
+    var t=adminCleanTotals(rows);
+    var body=rows.map(function(r){
+      r=r||{};
+      var cand=adminCleanCount(r.candidates);
+      var terms=adminCleanCount(r.terms);
+      return '<tr>'
+        +'<td data-label="用户">'+esc(String(r.username||''))+'</td>'
+        +'<td class="num" data-label="评论总数">'+adminNumCell(r.total)+'</td>'
+        +'<td class="num" data-label="可清理条数">'+(cand>0?'<b>'+num(cand)+'</b>':'<span class="admin-zero">0</span>')+'</td>'
+        +'<td class="num" data-label="可清理体积">'+adminCleanBytesCell(r.candidateBytes,r.bytes)+'</td>'
+        +'<td class="num" data-label="无法判断时间">'+adminNumCell(r.skipped)+'</td>'
+        +'<td class="num" data-label="筛选词数">'+(terms>0?num(terms):'<span class="admin-zero">0</span>')+'</td>'
+        +'</tr>';
+    }).join('');
+    var foot='<tr>'
+      +'<td colspan="2">合计 '+rows.length+' 个账号 · 评论 '+num(t.total)+' 条</td>'
+      +'<td class="num"><b>'+num(t.candidates)+'</b> 条</td>'
+      +'<td class="num"><b>'+esc(adminBytes(t.candidateBytes))+'</b></td>'
+      +'<td class="num">'+num(t.skipped)+'</td>'
+      +'<td class="num">—</td>'
+      +'</tr>';
+    return '<table class="tbl admin-tbl admin-clean-tbl">'
+      +'<colgroup><col class="admin-q1"><col class="admin-q2"><col class="admin-q3"><col class="admin-q4"><col class="admin-q5"><col class="admin-q6"></colgroup>'
+      +'<thead><tr><th>用户</th><th class="num">评论总数</th><th class="num">可清理条数</th><th class="num">可清理体积</th><th class="num">无法判断时间(跳过)</th><th class="num">筛选词数</th></tr></thead>'
+      +'<tbody>'+body+'</tbody>'
+      +'<tfoot>'+foot+'</tfoot></table>';
+  }
+
+  function adminCleanRender(){
+    adminCleanNotice();
+    var stamp=$('#adminCleanStamp');
+    if(stamp)stamp.textContent=adminClean.stamp?('更新于 '+adminClean.stamp):'—';
+    var wrap=$('#adminCleanWrap');if(!wrap)return;
+    if(!adminClean.data){
+      if(!adminClean.err){wrap.innerHTML='<p class="loading admin-pad">读取中…</p>';return}
+      wrap.innerHTML='<p class="hint admin-pad">清理预览没取到：'+esc(adminClean.err)+'。点上面的「预览」再来一次。</p>';
+      return;
+    }
+    var rows=adminCleanRows();
+    if(!rows.length){
+      wrap.innerHTML='<div class="empty"><b>还没有账号数据</b><p class="sub">有人开始采集评论后，这里会按账号列出可清理的条数、体积与筛选词数。</p></div>';
+      return;
+    }
+    wrap.innerHTML=adminCleanTableHtml(rows);
+  }
+
+  /* ---------------------------------------------------------------- 数据清理：交互 */
+  /** 二次确认：输入框内容必须正好是「确认清理」。 */
+  function adminCleanConfirmHit(){
+    var input=$('#adminCleanInput');
+    return String(input?input.value:'').trim()==='确认清理';
+  }
+
+  function adminCleanMsgPaint(){
+    var el=$('#adminCleanMsg');if(!el)return;
+    el.className='admin-danger-msg'+(adminClean.msgKind?' is-'+adminClean.msgKind:'');
+    el.textContent=adminClean.msg;
+  }
+
+  function adminCleanSyncBtns(){
+    var pre=$('#adminCleanPreview'),run=$('#adminCleanRun'),ok=$('#adminCleanOk');
+    var locked=!!(adminClean.busy||adminClean.run);
+    if(pre)pre.disabled=locked;
+    if(run){run.disabled=locked;run.textContent=adminClean.run?'清理中…':'执行清理'}
+    if(ok)ok.disabled=locked||!adminCleanConfirmHit();
+  }
+
+  function adminCleanStageSet(stage){
+    adminClean.stage=stage==='confirm'?'confirm':'idle';
+    var box=$('#adminCleanConfirm');if(box)box.hidden=adminClean.stage!=='confirm';
+    var input=$('#adminCleanInput');if(input)input.value='';
+    adminCleanSyncBtns();
+    if(adminClean.stage==='confirm'&&input)setTimeout(function(){try{input.focus()}catch(e){}},0);
+  }
+
+  async function adminCleanLoad(){
+    if(adminClean.busy||adminClean.run)return;
+    adminClean.busy=true;adminClean.err='';adminClean.data=null;
+    var seq=++adminClean.seq;
+    var note=$('#adminCleanNote');if(note){note.hidden=true;note.className='admin-clean-note';note.innerHTML=''}
+    var wrap=$('#adminCleanWrap');if(wrap)wrap.innerHTML='<p class="loading admin-pad">读取中…</p>';
+    var stamp=$('#adminCleanStamp');if(stamp)stamp.textContent='正在读取…';
+    adminCleanSyncBtns();
+    var out=null,err='';
+    try{out=await api('/api/admin/cleanup?days='+encodeURIComponent(String(adminClean.days)))}
+    catch(error){err=adminErrText(error)}
+    adminClean.busy=false;
+    if(seq!==adminClean.seq){adminCleanSyncBtns();return}
+    if(err){adminClean.err=err;adminClean.stamp=''}
+    else{
+      adminClean.data=out||{days:adminClean.days,users:[],totals:{}};
+      adminClean.stamp=adminClock();
+    }
+    adminCleanSyncBtns();
+    adminCleanRender();
+  }
+
+  /** 只处理超期且从未被筛选词命中的评论正文，其余数据不动。 */
+  async function adminCleanRunNow(){
+    if(adminClean.run||adminClean.busy)return;
+    if(!adminCleanConfirmHit())return;
+    var days=adminClean.days;
+    adminClean.run=true;
+    adminClean.msg='清理中…';adminClean.msgKind='';
+    adminCleanMsgPaint();
+    adminCleanSyncBtns();
+    var out=null,err='';
+    try{out=await post('/api/admin/cleanup',{days:days,confirm:'确认清理'})}
+    catch(error){err=adminErrText(error)}
+    adminClean.run=false;
+    adminCleanStageSet('idle');
+    if(err){
+      adminClean.msg='清理失败：'+err;adminClean.msgKind='bad';
+      adminCleanMsgPaint();
+      toast('清理失败','err');
+      return;
+    }
+    var removed=adminCleanCount(out&&out.removed);
+    var freed=adminCleanCount(out&&out.freedBytes);
+    adminClean.msg='已删 '+num(removed)+' 条，释放 '+adminBytes(freed);
+    adminClean.msgKind=removed>0?'ok':'';
+    adminCleanMsgPaint();
+    toast('已删 '+num(removed)+' 条，释放 '+adminBytes(freed),removed>0?'':'');
+    adminCleanLoad();
+  }
+
+  function adminCleanBind(){
+    var days=$('#adminCleanDays');
+    if(days)days.onchange=function(){
+      var v=Number(days.value);
+      adminClean.days=v>0?v:adminCleanDefault;
+      adminClean.stamp='';
+      adminCleanStageSet('idle');
+      adminCleanLoad();
+    };
+    var pre=$('#adminCleanPreview');
+    if(pre)pre.onclick=function(){adminCleanLoad()};
+    var run=$('#adminCleanRun');
+    if(run)run.onclick=function(){
+      if(adminClean.run||adminClean.busy)return;
+      adminCleanStageSet(adminClean.stage==='confirm'?'idle':'confirm');
+    };
+    var input=$('#adminCleanInput');
+    if(input){
+      input.oninput=function(){adminCleanSyncBtns()};
+      input.onkeydown=function(ev){
+        var key=ev.key||'';
+        if(key==='Enter'){ev.preventDefault();if(adminCleanConfirmHit())adminCleanRunNow();return}
+        if(key==='Escape'){ev.preventDefault();adminCleanStageSet('idle')}
+      };
+    }
+    var ok=$('#adminCleanOk');
+    if(ok)ok.onclick=function(){adminCleanRunNow()};
+    var cancel=$('#adminCleanCancel');
+    if(cancel)cancel.onclick=function(){adminCleanStageSet('idle')};
+    adminCleanSyncBtns();
+    adminCleanMsgPaint();
+  }
+
   /* ---------------------------------------------------------------- 错误横幅 */
   function adminShowErr(message){
     var box=$('#adminErr');if(!box)return;
@@ -885,7 +1172,9 @@ export const admin: View = {
   });
 
   adminBind();
+  adminCleanBind();
   omc.onShow('admin',adminLoad);
+  omc.onShow('admin',adminCleanLoad);
 })();
 `,
 }

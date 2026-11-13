@@ -17,6 +17,7 @@ import { LeadStore, buildLeads, toCsv } from './leads.js'
 import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
 import { loadLexicon, saveLexicon, sanitizeLexicon } from './lexicon.js'
 import { appendChat, hasMessage, listChat, listThreads } from './chat.js'
+import { addFilterTerms, applyCleanup, planCleanup } from './cleanup.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
@@ -431,6 +432,47 @@ export async function startUiServer(options: { port?: number; host?: string; out
     }
 
     // ---------------------------------------------------------------- 用户管理
+    if (url.pathname === '/api/filters/used' && req.method === 'POST') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const terms = Array.isArray(input.terms) ? input.terms.map((term) => String(term)) : []
+      const all = await addFilterTerms(userRoot(user.username), terms)
+      return json(res, { ok: true, terms: all.length })
+    }
+
+    if (url.pathname === '/api/admin/cleanup' && req.method === 'GET') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
+      const days = Math.min(3650, Math.max(1, Number(url.searchParams.get('days') ?? 30)))
+      const rows: Array<{ username: string; days: number; total: number; candidates: number; bytes: number; candidateBytes: number; skipped: number; terms: number }> = []
+      for (const item of await listUsers()) {
+        const plan = await planCleanup(userRoot(item.username), { days })
+        rows.push({ username: item.username, days, total: plan.total, candidates: plan.candidates.length, bytes: plan.bytes, candidateBytes: plan.candidates.reduce((sum, one) => sum + one.bytes, 0), skipped: plan.skipped, terms: plan.terms.length })
+      }
+      const sum = (key: 'total' | 'candidates' | 'bytes' | 'candidateBytes' | 'skipped') => rows.reduce((total, row) => total + row[key], 0)
+      return json(res, { days, users: rows, totals: { total: sum('total'), candidates: sum('candidates'), bytes: sum('bytes'), candidateBytes: sum('candidateBytes'), skipped: sum('skipped') } })
+    }
+    if (url.pathname === '/api/admin/cleanup' && req.method === 'POST') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能清理' }, 403)
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      if (String(input.confirm ?? '') !== '确认清理') return json(res, { error: '需要输入「确认清理」' }, 400)
+      const days = Math.min(3650, Math.max(1, Number(input.days ?? 30)))
+      const only = input.user ? String(input.user) : ''
+      const rows: Array<{ username: string; removed: number; freedBytes: number }> = []
+      let removed = 0
+      let freedBytes = 0
+      for (const item of await listUsers()) {
+        if (only && item.username !== only) continue
+        const plan = await planCleanup(userRoot(item.username), { days })
+        if (!plan.candidates.length) { rows.push({ username: item.username, removed: 0, freedBytes: 0 }); continue }
+        const result = await applyCleanup(plan)
+        removed += result.removed
+        freedBytes += result.freedBytes
+        rows.push({ username: item.username, removed: result.removed, freedBytes: result.freedBytes })
+      }
+      return json(res, { days, removed, freedBytes, users: rows })
+    }
+
     if (url.pathname === '/api/admin/day' && req.method === 'GET') {
       if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
       const who = String(url.searchParams.get('user') ?? '')

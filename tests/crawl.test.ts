@@ -602,6 +602,33 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('admin cleanup previews and removes old comments that no filter matched', async () => {
+    const { out, ui, base } = await uiServer('omc-ui-clean-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      const dir = join(out, 'users', 'admin', 'douyin')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'search_comment_2025-01-01.jsonl'), [
+        JSON.stringify({ id: 'old-hit', item_id: 'i1', text: '消防设计多少钱', created_at: '2025-01-01T10:00:00+08:00' }),
+        JSON.stringify({ id: 'old-miss', item_id: 'i1', text: '路过看看', created_at: '2025-01-01T10:00:00+08:00' }),
+        JSON.stringify({ id: 'new-miss', item_id: 'i1', text: '路过看看', created_at: new Date().toISOString() }),
+      ].join('\n') + '\n', 'utf8')
+      await fetch(`${base}/api/lexicon`, { method: 'POST', headers: auth, body: JSON.stringify({ keywords: [], filters: ['消防'] }) })
+
+      const preview = await (await fetch(`${base}/api/admin/cleanup?days=30`, { headers: { cookie } })).json() as { totals: { candidates: number; total: number } }
+      expect(preview.totals).toMatchObject({ candidates: 1, total: 3 })
+
+      expect((await fetch(`${base}/api/admin/cleanup`, { method: 'POST', headers: auth, body: JSON.stringify({ days: 30, confirm: 'no' }) })).status).toBe(400)
+      const run = await (await fetch(`${base}/api/admin/cleanup`, { method: 'POST', headers: auth, body: JSON.stringify({ days: 30, confirm: '确认清理' }) })).json() as { removed: number }
+      expect(run.removed).toBe(1)
+
+      const after = await (await fetch(`${base}/api/admin/cleanup?days=30`, { headers: { cookie } })).json() as { totals: { candidates: number; total: number } }
+      expect(after.totals).toMatchObject({ candidates: 0, total: 2 })
+      expect((await fetch(`${base}/api/admin/cleanup`, { headers: { cookie: `omc_session=none` } })).status).toBe(401)
+    } finally { await ui.close() }
+  })
+
   it('stops a running crawl job', async () => {
     const out = await tempDir('omc-ui-stop-')
     const home = await tempDir('omc-stop-home-')

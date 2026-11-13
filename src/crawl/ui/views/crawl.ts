@@ -355,7 +355,7 @@ function crawlChipAddList(kind,terms){
   });
   if(added){
     crawlChipRender(kind);
-    if(kind!=='kw')crawlRenderComments();
+    if(kind!=='kw'){crawlReportTerms();crawlRenderComments();}
   }
   return {added:added,skipped:skipped};
 }
@@ -391,7 +391,7 @@ function crawlChipPop(kind){
   if(!list||!list.length)return;
   list.pop();
   crawlChipRender(kind);
-  if(kind!=='kw')crawlRenderComments();
+  if(kind!=='kw'){crawlReportTerms();crawlRenderComments();}
 }
 
 function crawlChipRemove(kind,term){
@@ -402,7 +402,18 @@ function crawlChipRemove(kind,term){
   if(at<0)return;
   list.splice(at,1);
   crawlChipRender(kind);
-  if(kind!=='kw')crawlRenderComments();
+  if(kind!=='kw'){crawlReportTerms();crawlRenderComments();}
+}
+
+/* 把用过的评论筛选词留给后端（数据清理时判断“有没有被筛到过”）。 */
+var crawlTermTimer=null;
+function crawlReportTerms(){
+  clearTimeout(crawlTermTimer);
+  crawlTermTimer=setTimeout(function(){
+    var terms=(crawlState.filters||[]).slice(0,50);
+    if(!terms.length)return;
+    post('/api/filters/used',{terms:terms}).catch(function(){});
+  },800);
 }
 
 function crawlChipClear(kind){

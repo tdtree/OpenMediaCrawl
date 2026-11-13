@@ -88,10 +88,21 @@ function showApp(){
   $('#who').innerHTML='<b>'+esc(me.username||'')+'</b>'+(me.role==='admin'?' · admin':'');
   var gh=$('.side-link');if(gh)gh.hidden=me.role!=='admin';
   var navAdmin=$('#navAdmin');if(navAdmin)navAdmin.hidden=me.role!=='admin';
+  if(me.role==='admin')refreshAdminBadge();
   var start=location.hash.indexOf('#/')===0?location.hash.slice(2):'overview';
   go(start);
   omc._login.forEach(function(f){try{f()}catch(e){console.error(e)}});
   refreshRunBadge();setInterval(refreshRunBadge,15000);
+}
+/* 用户管理徽标：有多少条「超过 30 天没被筛选词命中」的评论等着清理。 */
+async function refreshAdminBadge(){
+  var nav=$('#navAdmin');if(!nav)return;
+  try{
+    var r=await api('/api/admin/cleanup?days=30');
+    var n=(r&&r.totals&&r.totals.candidates)||0;
+    var old=nav.querySelector('.nav-n');if(old)old.remove();
+    if(n>0){var b=document.createElement('span');b.className='nav-n';b.textContent=n>99?'99+':String(n);b.title='有 '+n+' 条评论可清理';nav.appendChild(b)}
+  }catch(e){}
 }
 async function boot(){try{omc.state.me=await api('/api/me');showApp()}catch(e){showLogin()}}
 `;

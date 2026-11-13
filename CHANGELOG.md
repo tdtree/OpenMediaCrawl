@@ -8,6 +8,11 @@
 
 ### Added
 
+- 数据清理：`GET/POST /api/admin/cleanup` 预览并删除「超过 N 天、且从未被任何筛选词命中」的评论正文；筛选词 = 词库过滤词 + 历史用过的（`filter-history.json`）；保留线索、发送记录、会话与断点状态，重爬不重复抓取；缺时间字段的行跳过，删除前留 `.bak`
+- 「用户管理 → 数据清理」面板：7/30/90 天切换、按用户预览、候选体积、输入「确认清理」二次确认、执行结果就地回显；admin 侧栏显示待清理条数徽标
+- Web 控制台镜像：`Dockerfile.web` + `.github/workflows/docker.yml` 推 `ghcr.io/tdtree/openmediacrawl:latest|sha|tag`；`ui` 命令支持 `--host`/`OMC_UI_HOST`，容器内监听 0.0.0.0，数据卷 `/data`
+- `compose.yaml` 增加 `web` 服务与 `omc-data` 卷；文档补局域网访问、防火墙、备份与清理规则
+
 - 采集表单二次收紧：平台/类型/最多条数/排序合并成一行四列（≤1100 两列、≤640 单列），关键词占整行；词数并入标题行、提交说明与按钮同一行，整表单 437→287px；去掉重复的 `crawlCmFilterN`
 - 细节合规：占位符统一以 … 结尾、封面图补 width/height、滚动容器加 `overscroll-behavior: contain`、必填星号只跟在字段名后
 

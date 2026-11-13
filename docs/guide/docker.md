@@ -96,3 +96,14 @@ docker run -d --name omc   -p 8080:8080   -v omc-data:/data   -e OMC_ADMIN_PASSW
 - 镜像不含京东验证码 / OCR 模型（这两个平台在 Web 版里会报缺模型）；需要这些能力请用 CLI 镜像。
 - 想用 compose：`docker compose up -d web`（服务名 `web`，同样挂 `omc-data` 卷）。
 
+### 局域网访问
+
+镜像内已经监听 `0.0.0.0:8080`，宿主机映射出来后同事直接开 `http://<宿主机IP>:8080` 即可：
+
+- Windows 首次访问不通，多半是防火墙：放行 8080/tcp（`netsh advfirewall firewall add rule name="omc" dir=in action=allow protocol=TCP localport=8080`）。
+- 第一次登录用 `admin` + `OMC_ADMIN_PASSWORD`；其他人用登录页「申请（真实姓名）」自助注册，状态是 `pending`，需要 admin 在「用户管理」里点「通过」才能进。
+- 会话是内存里的 cookie，容器重启要重新登录（数据不丢）。
+- 只在内网用：现在是明文 HTTP，别把 8080 直接映射到公网；要外网访问请在前面加一层 HTTPS 反向代理。
+- 备份/迁移只需搬卷：`docker run --rm -v omc-data:/data -v "$PWD:/backup" alpine tar czf /backup/omc-data.tgz -C /data .`
+
+
