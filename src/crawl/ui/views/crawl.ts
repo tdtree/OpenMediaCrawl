@@ -11,6 +11,17 @@ export const crawl: View = {
   sub: '按关键词、作品或博主批量采集，回看已落盘的作品和评论。',
   css: String.raw`
 /* ---------------------------------------------------------------- 采集：启动表单 */
+/* 紧凑：输入框矮一点、间距小一点，一屏能看全基础+范围 */
+.crawl-form{padding:var(--s3) var(--s4)}
+.crawl-form .grid2,.crawl-form .grid3{gap:var(--s2)}
+.crawl-form .field{gap:0}
+.crawl-form .field>span{font-size:var(--fs-xs);line-height:1.7}
+.crawl-form input,.crawl-form select{min-height:30px;padding:3px 8px;font-size:var(--fs-sm)}
+.crawl-form .crawl-group+.crawl-group{margin-top:var(--s3);padding-top:var(--s3)}
+.crawl-form .crawl-gt{margin-bottom:var(--s1)}
+.crawl-form .crawl-sub{margin-top:var(--s3)}
+#crawlMax,#crawlMaxComments,#crawlSleep{max-width:150px}
+.crawl-chips{min-height:32px}
 .crawl-form .crawl-group+.crawl-group{margin-top:var(--s4);padding-top:var(--s4);border-top:1px dashed var(--line)}
 .crawl-gt{font-size:var(--fs-xs);color:var(--muted);letter-spacing:.06em;margin-bottom:var(--s2)}
 .crawl-adv{margin-top:var(--s4);padding-top:var(--s3);border-top:1px dashed var(--line)}

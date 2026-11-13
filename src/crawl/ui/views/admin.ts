@@ -3,7 +3,7 @@ import type { View } from '../types.js'
 /**
  * 用户管理（仅 admin）：每个账号每天的关键词、评论、群发、沟通与占用。
  *
- * 结构：工具栏（天数 / 用户 / 刷新 / 更新时间）→ 台账式 4 汇总 → 按天明细 → 账号概览。
+ * 结构：工具栏（天数 / 用户 / 刷新 / 更新时间）→ 台账式 4 汇总 → 按天明细（每行可展开看当天的任务 / 线索 / 发送 / 会话）→ 账号概览。
  * 视图 js 与其它视图共享全局作用域，函数 / 变量 / id / class 一律 admin 前缀。
  */
 export const admin: View = {
@@ -49,6 +49,7 @@ export const admin: View = {
 .admin-tbl-day col.admin-c5,
 .admin-tbl-day col.admin-c6{width:64px}
 .admin-tbl-day col.admin-c7{width:88px}
+.admin-tbl-day col.admin-c8{width:68px}
 .admin-tbl-use col.admin-u1{width:132px}
 .admin-tbl-use col.admin-u2{width:84px}
 .admin-tbl-use col.admin-u3{width:72px}
@@ -74,6 +75,49 @@ export const admin: View = {
 .admin-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s4);margin-top:var(--s3);font-size:var(--fs-xs);color:var(--muted)}
 .admin-sum b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
 
+/* 按天明细：行内展开（紧凑四组，不做大卡片） */
+.admin-day-row{cursor:pointer}
+.admin-day-row.is-open td{background:var(--row-hover)}
+.admin-day-op{text-align:right;padding-left:0}
+.admin-day-btn{white-space:nowrap}
+.admin-day-x>td,.admin-tbl tbody tr.admin-day-x:hover>td{padding:0;background:var(--bg);border-bottom:1px solid var(--line)}
+.admin-dayx{padding:var(--s1) var(--s3) var(--s3)}
+.admin-dayx-h{display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;padding:var(--s1) 0 var(--s2)}
+.admin-dayx-h b{font-size:var(--fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
+.admin-dayx-note{white-space:nowrap}
+.admin-dayx-load{margin:0;padding:var(--s2) 0}
+.admin-dayx-bad{color:var(--danger)}
+.admin-dayx-err{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;padding:var(--s2) 0}
+.admin-dayx-err b{color:var(--danger);font-size:var(--fs-sm)}
+.admin-dayx-err .sub{flex:1 1 200px;min-width:0;word-break:break-word}
+
+.admin-dgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3) var(--s5)}
+.admin-dg{min-width:0}
+.admin-dg-leads,.admin-dg-chats{grid-column:1/-1}
+.admin-dg-h{display:flex;align-items:baseline;gap:6px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+.admin-dg-h b{font-size:var(--fs-xs);font-weight:600;letter-spacing:.03em}
+.admin-dg-meta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.admin-dg-b{display:flex;flex-direction:column;max-height:212px;overflow:auto;overscroll-behavior:contain}
+.admin-dg-none{margin:0;padding:6px 0;font-size:var(--fs-xs);color:var(--muted)}
+.admin-dg-more{margin:0;padding:5px 0 0;font-size:11px;color:var(--muted)}
+.admin-dg-t{font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+.admin-dg-li{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0;padding:4px 0;border-bottom:1px solid var(--line)}
+.admin-dg-li:last-child{border-bottom:0}
+.admin-dg-li .admin-kws{flex:1 1 140px;min-width:0}
+.admin-dg-io{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.admin-dg-io b{color:var(--fg);font-weight:600}
+.admin-dgr{display:grid;align-items:baseline;gap:0 var(--s3);min-width:0;padding:4px 0;border-bottom:1px solid var(--line)}
+.admin-dgr:last-child{border-bottom:0}
+.admin-dgr>span{min-width:0;font-size:var(--fs-xs)}
+.admin-dgr-hx{position:sticky;top:0;z-index:1;background:var(--bg);border-bottom:1px solid var(--line)}
+.admin-dgr-hx>span{font-size:11px;color:var(--muted);letter-spacing:.02em}
+.admin-dgr-lead{grid-template-columns:92px minmax(0,1fr) 56px 126px minmax(0,148px)}
+.admin-dgr-sent{grid-template-columns:38px 54px minmax(0,1fr) 60px 46px}
+.admin-dgr-chat{grid-template-columns:38px 44px minmax(0,118px) minmax(0,1fr)}
+.admin-e{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-dgc{display:flex;flex-wrap:wrap;gap:2px 4px;min-width:0}
+.admin-ctb{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:1.5;padding:0 4px;border:1px solid var(--line);border-radius:3px;background:var(--card);color:var(--fg)}
+
 @media(max-width:1100px){
   .admin-tbl-day{min-width:0}
   .admin-tbl-use{min-width:820px}
@@ -83,6 +127,11 @@ export const admin: View = {
   .admin-cell:nth-child(3){border-left:0;padding-left:0}
   .admin-cell:nth-child(n+3){border-top:1px solid var(--line)}
   .admin-tbl-wrap.admin-scroll{max-height:none}
+  .admin-dgrid{grid-template-columns:minmax(0,1fr)}
+  .admin-dg-leads,.admin-dg-chats{grid-column:auto}
+  .admin-dg-b{max-height:none}
+  .admin-dgr-lead{grid-template-columns:84px minmax(0,1fr) 52px 104px}
+  .admin-dgr-lead>span:nth-child(5){display:none}
 }
 @media(max-width:640px){
   .admin-f-days,.admin-f-user{width:100%}
@@ -92,6 +141,11 @@ export const admin: View = {
   .admin-cell{padding:10px var(--s3) 11px}
   .admin-kw{max-width:none}
   .admin-tbl-wrap{border-color:transparent}
+  .admin-dayx{padding:var(--s1) var(--s2) var(--s2)}
+  .admin-dgr-lead{grid-template-columns:80px minmax(0,1fr) 96px}
+  .admin-dgr-lead>span:nth-child(3){display:none}
+  .admin-dgr-sent{grid-template-columns:34px 48px minmax(0,1fr) 52px 42px}
+  .admin-dgr-chat{grid-template-columns:34px 42px minmax(0,84px) minmax(0,1fr)}
 }
 `,
   html: String.raw`<section class="sec">
@@ -152,7 +206,14 @@ export const admin: View = {
 /* ---- view: admin ---- */
 (function(){
   var adminDaysDefault=14;
-  var adminState={days:adminDaysDefault,user:'',busy:false,seq:0,activity:null,usage:null,activityErr:'',usageErr:'',stamp:''};
+  var adminState={days:adminDaysDefault,user:'',busy:false,seq:0,activity:null,usage:null,activityErr:'',usageErr:'',stamp:'',open:null,detail:{}};
+
+  /** 行内展开用到的名字表与条数上限（单日数据可能很长，超出就截断并注明）。 */
+  var adminPlatName={xhs:'小红书',douyin:'抖音',kuaishou:'快手',bilibili:'B 站',weibo:'微博',tiktok:'TikTok',x:'X'};
+  var adminTypeName={search:'搜索',detail:'作品详情',creator:'创作者'};
+  var adminKindName={dm:'私信',reply:'评论回复'};
+  var adminCtName={phone:'电话',wechat:'微信',qq:'QQ'};
+  var adminLeadMax=50,adminSentMax=50,adminChatMax=50;
 
   /* ---------------------------------------------------------------- 小工具 */
   function adminPad(n){return (n<10?'0':'')+n}
@@ -317,12 +378,298 @@ export const admin: View = {
       +'</div>';
   }
 
+  /* ---------------------------------------------------------------- 渲染：行内展开（当天明细） */
+  /** 行 key = 用户名 + 日期；用户名只含 [a-z0-9_-] 或中文，不会撞分隔符。 */
+  function adminDayKey(user,date){return String(user||'')+'|'+String(date||'')}
+
+  function adminDaySplit(key){
+    var s=String(key||''),at=s.indexOf('|');
+    if(at<0)return null;
+    var user=s.slice(0,at),date=s.slice(at+1);
+    if(!user||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date))return null;
+    return {key:s,username:user,date:date};
+  }
+
+  function adminDayRowEl(key){
+    var safe=String(key||'').split('"').join('').split('\\').join('');
+    return $('#adminDayWrap tr[data-admin-day="'+safe+'"]');
+  }
+  function adminDayXEl(){return $('#adminDayX')}
+  function adminDayIsOpen(ref){return !!(adminState.open&&ref&&adminState.open.key===ref.key)}
+
+  /** 当天只留 HH:mm；时间戳解析不了就退回 fmtTime 的尾部。 */
+  function adminHm(iso){
+    var s=String(iso||'');
+    if(!s)return '—';
+    var d=new Date(s);
+    if(isNaN(d.getTime())){var f=fmtTime(s);return f.slice(-5)||'—'}
+    return adminPad(d.getHours())+':'+adminPad(d.getMinutes());
+  }
+  function adminPlat(id){var k=String(id||'');return adminPlatName[k]||k||'—'}
+  function adminKind(id){var k=String(id||'');return adminKindName[k]||k||'—'}
+
+  function adminJobBadge(st){
+    var s=String(st||'');
+    if(s==='done')return '<span class="badge ok">完成</span>';
+    if(s==='error')return '<span class="badge err">失败</span>';
+    if(s==='stopped')return '<span class="badge warn">已停止</span>';
+    if(s==='running')return '<span class="badge run">进行中</span>';
+    return '<span class="badge">'+esc(s||'—')+'</span>';
+  }
+  function adminOkBadge(ok){
+    return ok?'<span class="badge ok">成功</span>':'<span class="badge err">失败</span>';
+  }
+
+  function adminDg(kind,title,meta,body){
+    return '<section class="admin-dg admin-dg-'+kind+'">'
+      +'<div class="admin-dg-h"><b>'+title+'</b><span class="admin-dg-meta">'+esc(meta)+'</span></div>'
+      +'<div class="admin-dg-b">'+body+'</div>'
+      +'</section>';
+  }
+  function adminDgNone(){return '<p class="admin-dg-none">无</p>'}
+  function adminDgMore(text){return '<p class="admin-dg-more">'+esc(text)+'</p>'}
+
+  /** 联系方式小标签，最多 3 个，其余折成 +N。 */
+  function adminContacts(list){
+    var raw=Array.isArray(list)?list:[],out=[];
+    for(var i=0;i<raw.length;i++){
+      var c=raw[i];
+      if(!c||c.value==null||c.value==='')continue;
+      var type=adminCtName[String(c.type)]||String(c.type||'');
+      var text=(type?type+' ':'')+String(c.value);
+      out.push('<span class="admin-ctb" title="'+esc(text)+'">'+esc(text)+'</span>');
+    }
+    if(!out.length)return '<span class="admin-dash">—</span>';
+    if(out.length<=3)return out.join('');
+    return out.slice(0,3).join('')+'<span class="admin-ctb" title="其余 '+(out.length-3)+' 个">+'+(out.length-3)+'</span>';
+  }
+
+  function adminDgJobs(list){
+    var body='';
+    if(!list.length)body=adminDgNone();
+    else{
+      body=list.slice(0,adminSentMax).map(function(job){
+        job=job||{};
+        var items=Number(job.items)||0,comments=Number(job.comments)||0;
+        return '<div class="admin-dg-li">'
+          +'<span class="admin-dg-t">'+esc(adminHm(job.at))+'</span>'
+          +'<span class="badge">'+esc(adminTypeName[String(job.type)]||String(job.type||'')||'—')+'</span>'
+          +'<span class="badge">'+esc(adminPlat(job.platform))+'</span>'
+          +adminKeywords(job.keywords)
+          +'<span class="admin-dg-io num">作品 <b>'+items+'</b> · 评论 <b>'+comments+'</b></span>'
+          +adminJobBadge(job.status)
+          +'</div>';
+      }).join('');
+      if(list.length>adminSentMax)body+=adminDgMore('另有 '+(list.length-adminSentMax)+' 条任务未显示');
+    }
+    return adminDg('jobs','当天任务',list.length+' 条',body);
+  }
+
+  function adminDgLeads(list){
+    var shown=list.slice(0,adminLeadMax),body='';
+    if(!shown.length)body=adminDgNone();
+    else{
+      body='<div class="admin-dgr admin-dgr-hx admin-dgr-lead"><span>评论者</span><span>评论</span><span>地域</span><span>联系方式</span><span>来源作品</span></div>'
+        +shown.map(function(lead){
+          lead=lead||{};
+          var who=String(lead.author_name||'');
+          var text=String(lead.text||'');
+          var prov=String(lead.province||'');
+          var src=String(lead.item_title||lead.item_id||'');
+          return '<div class="admin-dgr admin-dgr-lead">'
+            +'<span class="admin-e" title="'+esc(who)+'">'+(who?esc(who):'<span class="admin-dash">—</span>')+'</span>'
+            +'<span class="admin-e" title="'+esc(text)+'">'+(text?esc(text):'<span class="admin-dash">—</span>')+'</span>'
+            +'<span class="admin-e" title="'+esc(prov)+'">'+(prov?esc(prov):'<span class="admin-dash">—</span>')+'</span>'
+            +'<span class="admin-dgc">'+adminContacts(lead.contacts)+'</span>'
+            +'<span class="admin-e" title="'+esc(src)+'">'+(src?esc(src):'<span class="admin-dash">—</span>')+'</span>'
+            +'</div>';
+        }).join('');
+      if(list.length>shown.length)body+=adminDgMore('共 '+list.length+' 条，只显示前 '+shown.length+' 条');
+    }
+    return adminDg('leads','当天线索',list.length+' 条',body);
+  }
+
+  function adminDgSent(list){
+    var shown=list.slice(0,adminSentMax),body='';
+    if(!shown.length)body=adminDgNone();
+    else{
+      body='<div class="admin-dgr admin-dgr-hx admin-dgr-sent"><span>时间</span><span>平台</span><span>对象</span><span>类型</span><span>结果</span></div>'
+        +shown.map(function(row){
+          row=row||{};
+          var target=String(row.target||'');
+          return '<div class="admin-dgr admin-dgr-sent">'
+            +'<span class="admin-dg-t">'+esc(adminHm(row.at))+'</span>'
+            +'<span class="admin-e">'+esc(adminPlat(row.platform))+'</span>'
+            +'<span class="admin-e" title="'+esc(target)+'">'+(target?esc(target):'<span class="admin-dash">—</span>')+'</span>'
+            +'<span class="admin-e">'+esc(adminKind(row.kind))+'</span>'
+            +'<span>'+adminOkBadge(row.ok)+'</span>'
+            +'</div>';
+        }).join('');
+      if(list.length>shown.length)body+=adminDgMore('另有 '+(list.length-shown.length)+' 条未显示');
+    }
+    return adminDg('sent','当天发送',list.length+' 条',body);
+  }
+
+  function adminDgChats(list){
+    var shown=list.length>adminChatMax?list.slice(list.length-adminChatMax):list;
+    var body='';
+    if(!shown.length)body=adminDgNone();
+    else{
+      body='<div class="admin-dgr admin-dgr-hx admin-dgr-chat"><span>时间</span><span>方向</span><span>对象</span><span>内容</span></div>'
+        +shown.map(function(msg){
+          msg=msg||{};
+          var out=msg.direction==='out';
+          var peer=String(msg.peerName||msg.peerId||'');
+          var text=String(msg.text||'');
+          var failed=out&&msg.status==='failed';
+          return '<div class="admin-dgr admin-dgr-chat">'
+            +'<span class="admin-dg-t">'+esc(adminHm(msg.at))+'</span>'
+            +'<span><span class="badge'+(out?' warn':'')+'">'+(out?'发出':'收到')+'</span></span>'
+            +'<span class="admin-e" title="'+esc(peer)+'">'+(peer?esc(peer):'<span class="admin-dash">—</span>')+'</span>'
+            +'<span class="admin-e'+(failed?' admin-dayx-bad':'')+'" title="'+esc(text)+'">'+(text?esc(text):'<span class="admin-dash">—</span>')+'</span>'
+            +'</div>';
+        }).join('');
+      if(list.length>shown.length)body+=adminDgMore('共 '+list.length+' 条，显示最近 '+shown.length+' 条');
+    }
+    return adminDg('chats','当天会话',list.length+' 条',body);
+  }
+
+  function adminDayBodyHtml(data){
+    data=data||{};
+    var jobs=Array.isArray(data.jobs)?data.jobs:[];
+    var leads=Array.isArray(data.leads)?data.leads:[];
+    var sent=Array.isArray(data.sent)?data.sent:[];
+    var chats=Array.isArray(data.chats)?data.chats:[];
+    return '<div class="admin-dgrid">'
+      +adminDgJobs(jobs)+adminDgSent(sent)+adminDgLeads(leads)+adminDgChats(chats)
+      +'</div>';
+  }
+
+  function adminDayNote(data){
+    data=data||{};
+    var totals=data.totals||{};
+    var jobs=Array.isArray(data.jobs)?data.jobs.length:0;
+    return '任务 '+jobs+' · 线索 '+(Number(totals.leads)||0)+' · 发送 '+(Number(totals.sent)||0)+' · 会话 '+(Number(totals.chats)||0);
+  }
+
+  function adminDayBodyFor(ref,entry){
+    if(!entry||entry.state==='loading')return '<p class="loading admin-dayx-load">读取中…</p>';
+    if(entry.state==='err'){
+      return '<div class="admin-dayx-err"><b>当天明细没取到</b>'
+        +'<span class="sub">'+esc(entry.err||'未知错误')+'</span>'
+        +'<button class="btn sm" type="button" data-admin-dayr="'+esc(ref.key)+'">重试</button></div>';
+    }
+    return adminDayBodyHtml(entry.data);
+  }
+
+  function adminDayExpandHtml(ref){
+    var entry=adminState.detail[ref.key];
+    var note=!entry||entry.state==='loading'?'读取中…':(entry.state==='err'?'读取失败':adminDayNote(entry.data));
+    return '<tr class="admin-day-x" id="adminDayX"><td colspan="8"><div class="admin-dayx">'
+      +'<div class="admin-dayx-h"><b>'+esc(ref.date)+' · '+esc(ref.username)+'</b>'
+      +'<span class="tiny admin-dayx-note">'+esc(note)+'</span><span class="spacer"></span>'
+      +'<button class="btn sm ghost" type="button" data-admin-dayclose>收起</button></div>'
+      +'<div class="admin-dayx-b">'+adminDayBodyFor(ref,entry)+'</div>'
+      +'</div></td></tr>';
+  }
+
+  /** 按当前状态刷新：行按钮文案 + 展开区内容（同一时间只展开一行）。 */
+  function adminDayPaint(ref){
+    var open=adminDayIsOpen(ref);
+    var tr=adminDayRowEl(ref.key);
+    if(tr){
+      var btn=tr.querySelector('.admin-day-btn');
+      if(btn){
+        btn.textContent=open?(adminState.detail[ref.key]&&adminState.detail[ref.key].state==='loading'?'读取中…':'收起'):'查看';
+        btn.setAttribute('aria-expanded',open?'true':'false');
+      }
+      if(open)tr.classList.add('is-open');else tr.classList.remove('is-open');
+    }
+    if(!open)return;
+    var x=adminDayXEl();
+    if(!x)return;
+    var entry=adminState.detail[ref.key];
+    var note=x.querySelector('.admin-dayx-note');
+    if(note)note.textContent=!entry||entry.state==='loading'?'读取中…':(entry.state==='err'?'读取失败':adminDayNote(entry.data));
+    var body=x.querySelector('.admin-dayx-b');
+    if(body)body.innerHTML=adminDayBodyFor(ref,entry);
+  }
+
+  function adminDayFetch(ref){
+    var entry={state:'loading',data:null,err:''};
+    adminState.detail[ref.key]=entry;
+    adminDayPaint(ref);
+    api('/api/admin/day?user='+encodeURIComponent(ref.username)+'&date='+encodeURIComponent(ref.date))
+      .then(function(value){
+        if(adminState.detail[ref.key]!==entry)return;
+        entry.state='ok';entry.data=value||{};
+        adminDayPaint(ref);
+      },function(error){
+        if(adminState.detail[ref.key]!==entry)return;
+        entry.state='err';entry.err=adminErrText(error);
+        adminDayPaint(ref);
+      });
+  }
+
+  function adminDayOpen(ref){
+    var prev=adminState.open;
+    var old=adminDayXEl();
+    if(old&&old.parentNode)old.parentNode.removeChild(old);
+    if(prev&&prev.key!==ref.key){
+      var prevRow=adminDayRowEl(prev.key);
+      if(prevRow){
+        prevRow.classList.remove('is-open');
+        var prevBtn=prevRow.querySelector('.admin-day-btn');
+        if(prevBtn){prevBtn.textContent='查看';prevBtn.setAttribute('aria-expanded','false')}
+      }
+    }
+    adminState.open=ref;
+    var tr=adminDayRowEl(ref.key);
+    if(!tr)return;
+    var holder=document.createElement('tbody');
+    holder.innerHTML=adminDayExpandHtml(ref);
+    var row=holder.firstElementChild;
+    if(row)tr.parentNode.insertBefore(row,tr.nextSibling);
+    var entry=adminState.detail[ref.key];
+    if(entry&&(entry.state==='ok'||entry.state==='loading'))adminDayPaint(ref);
+    else adminDayFetch(ref);
+  }
+
+  function adminDayClose(){
+    var x=adminDayXEl();
+    if(x&&x.parentNode)x.parentNode.removeChild(x);
+    var ref=adminState.open;
+    adminState.open=null;
+    if(!ref)return;
+    var tr=adminDayRowEl(ref.key);
+    if(!tr)return;
+    tr.classList.remove('is-open');
+    var btn=tr.querySelector('.admin-day-btn');
+    if(btn){btn.textContent='查看';btn.setAttribute('aria-expanded','false')}
+  }
+
+  function adminDayToggle(key){
+    var ref=adminDaySplit(key);
+    if(!ref)return;
+    if(adminDayIsOpen(ref)){adminDayClose();return}
+    adminDayOpen(ref);
+  }
+
+  function adminDayRetry(key){
+    var ref=adminDaySplit(key);
+    if(ref)adminDayFetch(ref);
+  }
+
   function adminDayTableHtml(rows){
     var today=adminToday(),yesterday=adminYesterday();
     var body=rows.map(function(r){
       var mark=r.date===today?'<span class="admin-today">今天</span>'
         :r.date===yesterday?'<span class="admin-today">昨天</span>':'';
-      return '<tr>'
+      var ref={key:adminDayKey(r.username,r.date),username:r.username,date:r.date};
+      var open=adminDayIsOpen(ref);
+      var entry=adminState.detail[ref.key];
+      var label=open?(entry&&entry.state==='loading'?'读取中…':'收起'):'查看';
+      var html='<tr class="admin-day-row'+(open?' is-open':'')+'" data-admin-day="'+esc(ref.key)+'">'
         +'<td data-label="日期"><span class="admin-date">'+esc(r.date)+mark+'</span></td>'
         +'<td data-label="用户">'+esc(r.username)+'</td>'
         +'<td data-label="关键词">'+adminKeywords(r.keywords)+'</td>'
@@ -330,11 +677,14 @@ export const admin: View = {
         +'<td class="num" data-label="评论">'+adminNumCell(r.comments)+'</td>'
         +'<td class="num" data-label="群发">'+adminNumCell(r.sent)+'</td>'
         +'<td class="num" data-label="沟通客户">'+adminNumCell(r.customers)+'</td>'
+        +'<td class="admin-day-op" data-label="当天明细"><button class="btn sm ghost admin-day-btn" type="button" aria-expanded="'+(open?'true':'false')+'">'+esc(label)+'</button></td>'
         +'</tr>';
+      if(open)html+=adminDayExpandHtml(ref);
+      return html;
     }).join('');
     return '<table class="tbl admin-tbl admin-tbl-day">'
-      +'<colgroup><col class="admin-c1"><col class="admin-c2"><col class="admin-c3"><col class="admin-c4"><col class="admin-c5"><col class="admin-c6"><col class="admin-c7"></colgroup>'
-      +'<thead><tr><th>日期</th><th>用户</th><th>关键词</th><th class="num">作品</th><th class="num">评论</th><th class="num">群发</th><th class="num">沟通客户</th></tr></thead>'
+      +'<colgroup><col class="admin-c1"><col class="admin-c2"><col class="admin-c3"><col class="admin-c4"><col class="admin-c5"><col class="admin-c6"><col class="admin-c7"><col class="admin-c8"></colgroup>'
+      +'<thead><tr><th>日期</th><th>用户</th><th>关键词</th><th class="num">作品</th><th class="num">评论</th><th class="num">群发</th><th class="num">沟通客户</th><th class="admin-day-op">当天明细</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table>';
   }
 
@@ -347,7 +697,14 @@ export const admin: View = {
       return;
     }
     var rows=adminDayRows();
-    if(sub)sub.textContent=adminWindowText()+' · '+(adminState.user||'全部用户')+' · 有记录 '+rows.length+' 行，日期倒序。';
+    if(adminState.open){
+      var still=false;
+      for(var i=0;i<rows.length;i++){
+        if(adminDayKey(rows[i].username,rows[i].date)===adminState.open.key){still=true;break}
+      }
+      if(!still)adminState.open=null;
+    }
+    if(sub)sub.textContent=adminWindowText()+' · '+(adminState.user||'全部用户')+' · 有记录 '+rows.length+' 行，点「查看」看当天任务、线索、发送与会话。';
     wrap.innerHTML=rows.length?adminDayTableHtml(rows):adminEmptyHtml();
   }
 
@@ -446,6 +803,7 @@ export const admin: View = {
   function adminLoading(){
     adminState.activityErr='';adminState.usageErr='';
     adminState.activity=null;adminState.usage=null;
+    adminState.open=null;adminState.detail={};
     adminRenderLedger();
     var day=$('#adminDayWrap');if(day)day.innerHTML='<p class="loading admin-pad">读取中…</p>';
     var use=$('#adminUsageWrap');if(use)use.innerHTML='<p class="loading admin-pad">读取中…</p>';
@@ -514,11 +872,15 @@ export const admin: View = {
   document.addEventListener('click',function(ev){
     var node=ev.target,hit=null;
     while(node&&node!==document){
-      if(node.getAttribute&&(node.hasAttribute('data-admin-retry')||node.getAttribute('data-admin-go'))){hit=node;break}
+      if(node.getAttribute&&(node.hasAttribute('data-admin-retry')||node.hasAttribute('data-admin-go')
+        ||node.hasAttribute('data-admin-day')||node.hasAttribute('data-admin-dayr')||node.hasAttribute('data-admin-dayclose'))){hit=node;break}
       node=node.parentNode;
     }
     if(!hit)return;
     if(hit.hasAttribute('data-admin-retry')){adminLoad();return}
+    if(hit.hasAttribute('data-admin-dayclose')){adminDayClose();return}
+    if(hit.hasAttribute('data-admin-dayr')){adminDayRetry(hit.getAttribute('data-admin-dayr')||'');return}
+    if(hit.hasAttribute('data-admin-day')){adminDayToggle(hit.getAttribute('data-admin-day')||'');return}
     if(hit.getAttribute('data-admin-go')==='crawl')omc.go('crawl');
   });
 

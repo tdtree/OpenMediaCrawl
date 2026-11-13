@@ -21,7 +21,20 @@ export const leads: View = {
 .leads-bar .field{flex:0 0 auto}
 .leads-f-platform{width:170px}
 .leads-f-province{width:150px}
-.leads-f-q{flex:2 1 360px;min-width:240px}
+.leads-bar .leads-chip-field{flex:2 1 360px;min-width:260px}
+.leads-chip-head{display:flex;align-items:center;gap:var(--s2);min-height:22px}
+.leads-chip-head>span:first-child{color:var(--muted);font-size:var(--fs-sm)}
+.leads-chip-n{white-space:nowrap}
+.leads-chip-acts{display:flex;gap:var(--s1);margin-left:auto}
+.leads-chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1);padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--card);min-height:36px;cursor:text}
+.leads-chips:focus-within{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-soft)}
+.leads-chip{display:inline-flex;align-items:center;gap:2px;max-width:220px;padding:1px 3px 1px 7px;border-radius:3px;background:var(--acc-soft);color:var(--acc-ink);font-size:var(--fs-xs);line-height:1.7}
+.leads-chip-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button.leads-chip-x{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-size:var(--fs-sm);min-height:0;padding:0 3px;line-height:1;opacity:.6;cursor:pointer}
+button.leads-chip-x:hover{opacity:1;background:transparent;color:var(--danger)}
+input.leads-chip-in{flex:1 1 120px;width:auto;min-width:80px;min-height:0;padding:3px 2px;border:0;background:transparent;font-size:var(--fs-sm)}
+input.leads-chip-in:focus{outline:none}
+mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;border-radius:2px}
 .leads-f-contact{padding-bottom:8px;white-space:nowrap}
 .leads-q-hint{flex:1 1 100%;margin:0}
 .leads-per{margin-left:auto;padding-bottom:9px;white-space:nowrap}
@@ -75,7 +88,7 @@ export const leads: View = {
   .leads-time{white-space:normal}
   .leads-dt{grid-template-columns:1fr}
   .leads-f-platform,.leads-f-province{width:100%}
-  .leads-f-q{min-width:0}
+  .leads-bar .leads-chip-field{flex:1 1 auto;min-width:0}
   .leads-detail td{padding:var(--s3)}
   .leads-detail td::before{display:none}
 }
@@ -88,15 +101,25 @@ export const leads: View = {
     <label class="field leads-f-platform"><span>平台</span>
       <select id="leadsPlatform"><option value="">全部平台</option></select>
     </label>
-    <label class="field leads-f-q"><span>搜索</span>
-      <input id="leadsQ" type="search" placeholder="评论或昵称，多词用空格或 / 分隔…" autocomplete="off" aria-describedby="leadsQHint">
-    </label>
+    <div class="field leads-f-q leads-chip-field" id="leadsFieldQ">
+      <div class="leads-chip-head">
+        <span>搜索</span>
+        <span class="leads-chip-n tiny" id="leadsQN">共 0 个词</span>
+        <span class="leads-chip-acts">
+          <button class="ghost sm" type="button" id="leadsQImport">从词库导入</button>
+          <button class="ghost sm" type="button" id="leadsQClear" disabled>清空</button>
+        </span>
+      </div>
+      <div class="leads-chips" id="leadsQChips" data-leads-chips="q">
+        <input id="leadsQInput" class="leads-chip-in" type="text" autocomplete="off" aria-describedby="leadsQHint" placeholder="评论或昵称，空格 / 逗号 / 回车切词">
+      </div>
+    </div>
     <label class="field leads-f-province"><span>省份</span>
       <select id="leadsProvince"><option value="">全部地域</option></select>
     </label>
     <label class="check leads-f-contact"><input type="checkbox" id="leadsHasContact"> 只看有联系方式</label>
     <span class="leads-per tiny">每页 50 条</span>
-    <p class="hint leads-q-hint" id="leadsQHint">搜索同时匹配评论内容和评论者昵称；多个关键词用空格或 / 分隔，命中任意一个就算匹配（例：价格 私信 / 批发）。</p>
+    <p class="hint leads-q-hint" id="leadsQHint">搜索同时匹配评论内容和评论者昵称；每个词块是一个关键词，命中任意一个就算匹配（例：价格 私信 / 批发）。</p>
   </div>
 
   <div class="leads-actions">
@@ -114,15 +137,20 @@ export const leads: View = {
     sync:$('#leadsSync'),
     body:$('#leadsBody'),
     platform:$('#leadsPlatform'),
-    q:$('#leadsQ'),
+    qInput:$('#leadsQInput'),
+    qChips:$('#leadsQChips'),
+    qN:$('#leadsQN'),
+    qImportBtn:$('#leadsQImport'),
+    qClearBtn:$('#leadsQClear'),
     province:$('#leadsProvince'),
     contact:$('#leadsHasContact'),
     exportBtn:$('#leadsExportBtn'),
     rawBtn:$('#leadsExportRawBtn')
   };
-  var leadsState={user:'',items:[],total:0,offset:0,selected:{},open:{},error:'',stats:null,statsError:'',platforms:null,seq:0,touch:0,
+  var leadsState={user:'',items:[],total:0,offset:0,selected:{},open:{},error:'',stats:null,statsError:'',platforms:null,seq:0,touch:0,terms:[],hl:[],
     sync:{state:'idle',running:false,platforms:0,names:'',added:0,total:0,error:''}};
   var leadsQTimer=null;
+  var leadsIme=false;
 
   var leadsPlatformNames={xhs:'小红书',douyin:'抖音',kuaishou:'快手',bilibili:'B 站',weibo:'微博',tiktok:'TikTok',x:'X'};
   var leadsProfileBase={xhs:'https://www.xiaohongshu.com/user/profile/',douyin:'https://www.douyin.com/user/',kuaishou:'https://www.kuaishou.com/profile/',bilibili:'https://space.bilibili.com/',weibo:'https://weibo.com/u/',tiktok:'https://www.tiktok.com/@',x:'https://x.com/'};
@@ -171,20 +199,201 @@ export const leads: View = {
     return leadsPlatformNames[key]||key||'未知平台';
   }
 
-  /* ---------- 筛选参数 ---------- */
-  /* 后端把 q 按 [\s/]+ 拆开做 OR 匹配；前端只取同样的口径来写文案，请求仍然整串发。 */
-  function leadsKeywords(){
-    var raw=leadsEls.q.value.trim();
-    if(!raw)return [];
-    return raw.split(/[\s/]+/).filter(function(word){return !!word});
+  /* ---------- 词块编辑器（搜索词；交互与采集页一致，命名一律 leads 前缀） ---------- */
+  /* 分隔符与后端 / 词库同口径：空白、斜杠、逗号、顿号、分号、竖线。 */
+  var leadsChipSep=/[\/,，、;；|\s]/;
+  var leadsChipSplit=/[\/,，、;；|\s]+/;
+
+  function leadsChipHtml(term){
+    var t=esc(term);
+    return '<span class="leads-chip" data-leads-chip="1" title="'+t+'">'+
+      '<span class="leads-chip-t">'+t+'</span>'+
+      '<button class="leads-chip-x" type="button" data-leads-chip-del="'+t+'" aria-label="删除 '+t+'">×</button>'+
+    '</span>';
   }
+  /* 输入框里还没按回车的半截词也算一个关键词：边打边搜，不必先切词再查。 */
+  function leadsQTyped(){
+    return leadsEls.qInput?String(leadsEls.qInput.value||'').trim():'';
+  }
+  function leadsTerms(){
+    var all=leadsState.terms.slice();
+    var typed=leadsQTyped();
+    if(typed)all=all.concat(typed.split(leadsChipSplit));
+    var seen={},out=[];
+    for(var i=0;i<all.length;i++){
+      var word=String(all[i]==null?'':all[i]).trim().slice(0,40);
+      if(!word)continue;
+      var key=word.toLowerCase();
+      if(seen[key])continue;
+      seen[key]=1;
+      out.push(word);
+    }
+    return out;
+  }
+  /* 提交给后端：词块 join(' ')，后端再按 [\s/]+ 拆开做 OR。 */
+  function leadsQValue(){
+    return leadsTerms().join(' ');
+  }
+  function leadsChipControls(){
+    var list=leadsState.terms;
+    if(leadsEls.qN)leadsEls.qN.textContent='共 '+list.length+' 个词';
+    if(leadsEls.qClearBtn)leadsEls.qClearBtn.disabled=!list.length&&!leadsQTyped();
+  }
+  function leadsChipRender(){
+    var box=leadsEls.qChips;
+    if(box){
+      var old=box.querySelectorAll('[data-leads-chip]');
+      for(var i=0;i<old.length;i++)if(old[i].parentNode)old[i].parentNode.removeChild(old[i]);
+      if(leadsState.terms.length){
+        var html=leadsState.terms.map(leadsChipHtml).join('');
+        if(leadsEls.qInput)leadsEls.qInput.insertAdjacentHTML('beforebegin',html);
+        else box.insertAdjacentHTML('afterbegin',html);
+      }
+    }
+    leadsChipControls();
+  }
+  /* 追加词块：忽略大小写去重，单个词最多 40 字（与词库一致）。 */
+  function leadsChipAddList(terms){
+    var arr=Object.prototype.toString.call(terms)==='[object Array]'?terms:[];
+    var seen={};
+    leadsState.terms.forEach(function(term){seen[String(term).toLowerCase()]=1});
+    var typed=leadsQTyped();
+    if(typed){
+      typed.split(leadsChipSplit).forEach(function(term){
+        var value=String(term==null?'':term).trim();
+        if(value)seen[value.toLowerCase()]=1;
+      });
+    }
+    var added=0,skipped=0;
+    for(var i=0;i<arr.length;i++){
+      var value=String(arr[i]==null?'':arr[i]).trim().slice(0,40);
+      if(!value){skipped++;continue}
+      var key=value.toLowerCase();
+      if(seen[key]){skipped++;continue}
+      seen[key]=1;
+      leadsState.terms.push(value);
+      added++;
+    }
+    if(added)leadsChipRender();else leadsChipControls();
+    return {added:added,skipped:skipped};
+  }
+  function leadsChipAddTerms(raw){
+    var text=String(raw==null?'':raw).trim();
+    if(!text)return {added:0,skipped:0};
+    return leadsChipAddList(text.split(leadsChipSplit).filter(function(word){return !!word}));
+  }
+  /* 输入框里出现分隔符就切词；最后一段可能还没打完，留在输入框里。 */
+  function leadsChipFlush(input){
+    if(!input)return false;
+    var value=String(input.value||'');
+    if(!leadsChipSep.test(value))return false;
+    var parts=value.split(leadsChipSplit);
+    var tail=parts.pop()||'';
+    input.value=tail;
+    if(parts.length)leadsChipAddList(parts);else leadsChipControls();
+    return true;
+  }
+  /* 回车：把输入框里剩下的整段也切成词块。 */
+  function leadsChipCommit(input){
+    if(!input)return false;
+    var value=String(input.value||'').trim();
+    input.value='';
+    if(value)leadsChipAddTerms(value);else leadsChipControls();
+    return true;
+  }
+  function leadsChipPop(){
+    if(!leadsState.terms.length)return;
+    leadsState.terms.pop();
+    leadsChipRender();
+  }
+  function leadsChipRemove(term){
+    for(var i=0;i<leadsState.terms.length;i++){
+      if(leadsState.terms[i]===term){leadsState.terms.splice(i,1);break}
+    }
+    leadsChipRender();
+  }
+  function leadsChipClear(){
+    leadsState.terms.length=0;
+    if(leadsEls.qInput)leadsEls.qInput.value='';
+    leadsChipRender();
+  }
+  /* 从词库导入：GET /api/lexicon 的 filters，去重追加；词库为空只提示，不动现有词块。 */
+  function leadsChipImport(btn){
+    if(btn)btn.disabled=true;
+    return api('/api/lexicon').then(function(result){
+      var list=result&&Object.prototype.toString.call(result.filters)==='[object Array]'?result.filters:[];
+      if(!list.length){
+        toast('词库里还没有筛选词','');
+        return;
+      }
+      var res=leadsChipAddList(list);
+      if(!res.added){
+        toast('词库里的 '+list.length+' 个词都已经在了','');
+        return;
+      }
+      toast('从词库导入 '+res.added+' 个词'+(res.skipped?'，跳过 '+res.skipped+' 个重复':''),'ok');
+      leadsQNow();
+    },function(error){
+      toast('词库读取失败：'+((error&&error.message)||'请求失败'),'err');
+    }).then(function(){
+      if(btn)btn.disabled=false;
+      leadsChipControls();
+    });
+  }
+  /* 词块增删是显式动作，立刻查；只有打字才走 300ms 防抖。 */
+  function leadsQNow(){
+    if(leadsQTimer){clearTimeout(leadsQTimer);leadsQTimer=null}
+    leadsFilterChanged();
+  }
+  function leadsQSoon(){
+    if(leadsQTimer)clearTimeout(leadsQTimer);
+    leadsQTimer=setTimeout(function(){leadsQTimer=null;leadsFilterChanged()},300);
+  }
+
+  /* ---------- 高亮（评论 / 评论者 / 详情原文） ---------- */
+  /* 正文先当纯文本，只为命中片段套 <mark>；关键词当字面量拼进正则（大小写不敏感），
+     所以正文里的 < > & " 不会变成标签，词里的正则元字符也不会生效。 */
+  function leadsHl(text,tokens){
+    var raw=String(text==null?'':text);
+    if(!raw)return '';
+    var seen={},list=[];
+    var source=Object.prototype.toString.call(tokens)==='[object Array]'?tokens:[];
+    for(var i=0;i<source.length;i++){
+      var value=String(source[i]==null?'':source[i]).trim().slice(0,40);
+      if(!value)continue;
+      var key=value.toLowerCase();
+      if(seen[key])continue;
+      seen[key]=1;
+      list.push(value);
+    }
+    if(!list.length)return esc(raw);
+    list.sort(function(a,b){return b.length-a.length});
+    var re;
+    try{
+      re=new RegExp('('+list.map(function(term){return term.replace(/[.*+?^$()|[\]{}\\]/g,'\\$&')}).join('|')+')','gi');
+    }catch(e){
+      return esc(raw);
+    }
+    var out='',pos=0,hits=0,m;
+    while((m=re.exec(raw))!==null&&hits<500){
+      if(!m[0]){re.lastIndex++;continue}
+      out+=esc(raw.slice(pos,m.index))+'<mark class="leads-hl">'+esc(m[0])+'</mark>';
+      pos=m.index+m[0].length;
+      hits++;
+    }
+    out+=esc(raw.slice(pos));
+    return out;
+  }
+
+  /* ---------- 筛选参数 ---------- */
+  /* 后端把 q 按 [\s/]+ 拆开做 OR 匹配；前端把词块 join(' ') 发出去，文案用同一份词表。 */
   function leadsHasFilter(){
-    return !!(leadsEls.platform.value||leadsEls.q.value.trim()||leadsEls.province.value||leadsEls.contact.checked);
+    return !!(leadsEls.platform.value||leadsQValue()||leadsEls.province.value||leadsEls.contact.checked);
   }
   function leadsFilterText(){
     var parts=[];
     if(leadsEls.platform.value)parts.push('平台 '+leadsPlatformName(leadsEls.platform.value));
-    var keywords=leadsKeywords();
+    var keywords=leadsTerms();
     if(keywords.length===1)parts.push('关键词「'+keywords[0]+'」');
     else if(keywords.length>1)parts.push('关键词「'+keywords.join('」「')+'」（命中任意一个）');
     if(leadsEls.province.value)parts.push('省份 '+leadsEls.province.value);
@@ -194,7 +403,7 @@ export const leads: View = {
   function leadsParams(){
     var out=[];
     if(leadsEls.platform.value)out.push('platform='+encodeURIComponent(leadsEls.platform.value));
-    var q=leadsEls.q.value.trim();
+    var q=leadsQValue();
     if(q)out.push('q='+encodeURIComponent(q));
     if(leadsEls.province.value)out.push('province='+encodeURIComponent(leadsEls.province.value));
     if(leadsEls.contact.checked)out.push('hasContact=1');
@@ -277,8 +486,9 @@ export const leads: View = {
     var author=profile
       ?('<a href="'+esc(profile)+'" target="_blank" rel="noopener">'+esc(who||profile)+'</a>')
       :(who?esc(who):'<span class="tiny">无</span>');
+    var full=leadsHl(lead.text||'',leadsState.hl);
     return '<div class="leads-dt">'+
-      '<p class="leads-full">'+esc(lead.text||'（空）')+'</p>'+
+      '<p class="leads-full">'+(full||'（空）')+'</p>'+
       '<div class="leads-dl">'+
         '<div><span class="tiny">平台</span> <b>'+esc(leadsPlatformName(lead.platform))+'</b></div>'+
         '<div><span class="tiny">作品</span> '+item+'</div>'+
@@ -291,13 +501,15 @@ export const leads: View = {
   function leadsRowHtml(lead){
     var id=String(lead.id||'');
     var name=lead.author_name||lead.author_id||'匿名';
+    var text=String(lead.text||'');
     var picked=leadsState.selected[id]?' checked':'';
     var open=!!leadsState.open[id];
     var contacts=leadsContactCell(lead.contacts);
+    var tokens=leadsState.hl;
     var cells=[
       '<td class="leads-c-sel" data-label="选择"><input type="checkbox" class="leads-pick" data-id="'+esc(id)+'"'+picked+' aria-label="选中 '+esc(name)+'"></td>',
-      '<td class="leads-ell" data-label="评论者" title="'+esc(name)+'">'+esc(name)+'</td>',
-      '<td class="leads-ell" data-label="评论" title="'+esc(lead.text||'')+'">'+esc(lead.text||'')+'</td>',
+      '<td class="leads-ell" data-label="评论者" title="'+esc(name)+'">'+leadsHl(name,tokens)+'</td>',
+      '<td class="leads-ell" data-label="评论" title="'+esc(text)+'">'+leadsHl(text,tokens)+'</td>',
       '<td class="leads-c-ct" data-label="联系方式" title="'+esc(contacts.title)+'"><div class="leads-ct">'+contacts.html+'</div></td>',
       '<td class="leads-ell" data-label="地域">'+(lead.province?esc(lead.province):'<span class="tiny">—</span>')+'</td>',
       '<td class="leads-time" data-label="时间">'+(lead.created_at?esc(fmtTime(lead.created_at)):'<span class="tiny">—</span>')+'</td>',
@@ -379,6 +591,8 @@ export const leads: View = {
   function leadsLoad(){
     var seq=++leadsState.seq;
     leadsState.error='';
+    /* 高亮词与这次请求的 q 同源，回来渲染时不跟着输入框继续变。 */
+    leadsState.hl=leadsTerms();
     leadsEls.body.classList.add('leads-busy');
     if(!leadsState.items.length)leadsEls.body.innerHTML='<p class="loading">读取中…</p>';
     var params=leadsParams();
@@ -524,6 +738,7 @@ export const leads: View = {
 
   /* ---------- 交互 ---------- */
   function leadsFilterChanged(){
+    if(leadsQTimer){clearTimeout(leadsQTimer);leadsQTimer=null}
     leadsState.touch++;
     leadsState.offset=0;
     leadsState.selected={};
@@ -540,7 +755,7 @@ export const leads: View = {
   }
   function leadsClearFilters(){
     leadsEls.platform.value='';
-    leadsEls.q.value='';
+    leadsChipClear();
     leadsEls.province.value='';
     leadsEls.contact.checked=false;
     leadsFilterChanged();
@@ -583,10 +798,12 @@ export const leads: View = {
     leadsState.platforms=null;
     leadsState.seq++;
     leadsState.touch=0;
+    leadsState.terms.length=0;
+    leadsState.hl=[];
     leadsState.sync={state:'idle',running:false,platforms:0,names:'',added:0,total:0,error:''};
     leadsEls.body.classList.remove('leads-busy');
     leadsEls.body.innerHTML='<p class="loading">读取中…</p>';
-    leadsEls.q.value='';
+    leadsChipClear();
     leadsEls.contact.checked=false;
     leadsFillProvinces([]);
     leadsRenderStats();
@@ -597,17 +814,73 @@ export const leads: View = {
   leadsEls.platform.addEventListener('change',leadsFilterChanged);
   leadsEls.province.addEventListener('change',leadsFilterChanged);
   leadsEls.contact.addEventListener('change',leadsFilterChanged);
-  leadsEls.q.addEventListener('input',function(){
-    if(leadsQTimer)clearTimeout(leadsQTimer);
-    leadsQTimer=setTimeout(leadsFilterChanged,300);
-  });
-  leadsEls.q.addEventListener('keydown',function(event){
-    if(event.key==='Enter'){
+
+  /* 词块：空格 / 斜杠 / 逗号 / 顿号切词，回车收尾，Backspace 删最后一个，× 单删，整串粘贴切词。 */
+  if(leadsEls.qInput){
+    leadsEls.qInput.addEventListener('input',function(event){
+      if(event.isComposing||leadsIme)return;
+      leadsChipFlush(leadsEls.qInput);
+      leadsChipControls();
+      leadsQSoon();
+    });
+    leadsEls.qInput.addEventListener('keydown',function(event){
+      if(event.isComposing||leadsIme)return;
+      var input=leadsEls.qInput;
+      if(event.key==='Enter'){
+        event.preventDefault();
+        leadsChipCommit(input);
+        leadsQNow();
+        return;
+      }
+      if(event.key==='Backspace'&&!String(input.value||'')){
+        if(!leadsState.terms.length)return;
+        event.preventDefault();
+        leadsChipPop();
+        leadsQNow();
+        return;
+      }
+      if(event.key==='Escape'&&(leadsState.terms.length||String(input.value||''))){
+        event.preventDefault();
+        leadsChipClear();
+        leadsQNow();
+      }
+    });
+    leadsEls.qInput.addEventListener('paste',function(event){
+      var data=event.clipboardData||window.clipboardData;
+      var text=data&&data.getData?String(data.getData('text')||''):'';
+      if(!text||!leadsChipSep.test(text))return;
       event.preventDefault();
-      if(leadsQTimer)clearTimeout(leadsQTimer);
-      leadsFilterChanged();
+      leadsChipAddTerms(text);
+      leadsQNow();
+    });
+    /* 中文输入法拼写过程中的空格 / 回车不切词 */
+    leadsEls.qInput.addEventListener('compositionstart',function(){leadsIme=true});
+    leadsEls.qInput.addEventListener('compositionend',function(){
+      leadsIme=false;
+      leadsChipFlush(leadsEls.qInput);
+      leadsChipControls();
+      leadsQSoon();
+    });
+  }
+  if(leadsEls.qChips)leadsEls.qChips.addEventListener('click',function(event){
+    var target=event.target;
+    if(!target||!target.closest)return;
+    var del=target.closest('[data-leads-chip-del]');
+    if(del){
+      leadsChipRemove(del.getAttribute('data-leads-chip-del')||'');
+      leadsQNow();
+      if(leadsEls.qInput)leadsEls.qInput.focus();
+      return;
     }
+    if(leadsEls.qInput&&target!==leadsEls.qInput)leadsEls.qInput.focus();
   });
+  if(leadsEls.qImportBtn)leadsEls.qImportBtn.addEventListener('click',function(){leadsChipImport(leadsEls.qImportBtn)});
+  if(leadsEls.qClearBtn)leadsEls.qClearBtn.addEventListener('click',function(){
+    leadsChipClear();
+    leadsQNow();
+    if(leadsEls.qInput)leadsEls.qInput.focus();
+  });
+  leadsChipRender();
 
   leadsEls.exportBtn.addEventListener('click',function(){
     var ids=leadsSelectedIds();

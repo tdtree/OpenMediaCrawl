@@ -585,6 +585,15 @@ describe('web UI', () => {
       expect(typeof actBody.users[0]!.totals.comments).toBe('number')
       expect((await fetch(`${base}/api/admin/activity`, { headers: { cookie: bobCookie } })).status).toBe(403)
 
+      const day = await fetch(`${base}/api/admin/day?user=admin&date=2026-11-13`, { headers: { cookie } })
+      expect(day.status).toBe(200)
+      const dayBody = await day.json() as { user: string; leads: unknown[]; jobs: unknown[]; totals: { leads: number } }
+      expect(dayBody.user).toBe('admin')
+      expect(Array.isArray(dayBody.leads)).toBe(true)
+      expect(Array.isArray(dayBody.jobs)).toBe(true)
+      expect((await fetch(`${base}/api/admin/day?user=admin&date=bad`, { headers: { cookie } })).status).toBe(400)
+      expect((await fetch(`${base}/api/admin/day?user=admin&date=2026-11-13`, { headers: { cookie: bobCookie } })).status).toBe(403)
+
       expect(await (await fetch(`${base}/api/chat/threads`, { headers: { cookie } })).json()).toEqual({ threads: [] })
       expect((await fetch(`${base}/api/chat/messages`, { headers: { cookie } })).status).toBe(400)
       expect((await fetch(`${base}/api/chat/send`, { method: 'POST', headers: auth, body: JSON.stringify({ platform: 'douyin', peerId: '', text: 'x' }) })).status).toBe(400)

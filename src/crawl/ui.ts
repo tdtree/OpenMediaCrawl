@@ -431,6 +431,49 @@ export async function startUiServer(options: { port?: number; host?: string; out
     }
 
     // ---------------------------------------------------------------- 用户管理
+    if (url.pathname === '/api/admin/day' && req.method === 'GET') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
+      const who = String(url.searchParams.get('user') ?? '')
+      const date = String(url.searchParams.get('date') ?? '')
+      if (!who || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(res, { error: '需要 user 和 date（YYYY-MM-DD）' }, 400)
+      const users = await listUsers()
+      if (!users.some((item) => item.username === who)) return json(res, { error: '用户不存在' }, 404)
+      const dir = userRoot(who)
+      const dayOf = (value: unknown) => String(value ?? '').slice(0, 10)
+      const jobs = (await readRows(join(dir, 'jobs.jsonl')))
+        .filter((row) => dayOf(row.at) === date)
+        .map((row) => ({
+          at: row.at,
+          platform: row.platform,
+          type: row.type,
+          keywords: Array.isArray(row.keywords) ? row.keywords : [],
+          items: Number(row.items ?? 0),
+          comments: Number(row.comments ?? 0),
+          status: row.status,
+          itemIds: Array.isArray(row.itemIds) ? row.itemIds : [],
+        }))
+      const allLeads = await new LeadStore(join(dir, 'leads.jsonl')).load()
+      const leads = allLeads
+        .filter((lead) => dayOf(lead.collected_at) === date)
+        .slice(0, 300)
+        .map((lead) => ({
+          id: lead.id,
+          author_name: lead.author_name,
+          text: lead.text,
+          province: lead.province,
+          contacts: lead.contacts,
+          item_title: lead.item_title,
+          item_id: lead.item_id,
+          collected_at: lead.collected_at,
+        }))
+      const sent = (await readRows(join(dir, 'sent.jsonl')))
+        .filter((row) => dayOf(row.at) === date)
+        .map((row) => ({ platform: row.platform, target: row.target, kind: row.kind, ok: row.ok, at: row.at }))
+      const chats = (await readRows(join(dir, 'chat.jsonl')))
+        .filter((row) => dayOf(row.at) === date)
+        .map((row) => ({ platform: row.platform, peerId: row.peerId, peerName: row.peerName, direction: row.direction, text: row.text, at: row.at, status: row.status }))
+      return json(res, { user: who, date, jobs, leads, sent, chats, totals: { leads: leads.length, sent: sent.length, chats: chats.length } })
+    }
     if (url.pathname === '/api/admin/activity' && req.method === 'GET') {
       if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
       const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days') ?? 14)))
@@ -845,8 +888,20 @@ export async function startUiServer(options: { port?: number; host?: string; out
       void (async () => {
         const opts = normalizeCrawlOptions({ ...input, out: userRoot(user.username), quiet: true })
         const env = { CATBUS_HOME: home }
+        const itemIds: string[] = []
         try {
-          job.result = await runCrawl(opts, { client: (options.clientFactory ?? createSubprocessClient)(opts.platform, { sort: opts.sort, env }), signal: controller.signal, onEvent: (event) => { job.history.push(JSON.stringify(event)); for (const client of job.events) client.write(`data: ${JSON.stringify(event)}\n\n`) } })
+          job.result = await runCrawl(opts, {
+            client: (options.clientFactory ?? createSubprocessClient)(opts.platform, { sort: opts.sort, env }),
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (event.type === 'item' && itemIds.length < 300) {
+                const saved = String((event.data as { id?: unknown } | undefined)?.id ?? '')
+                if (saved) itemIds.push(saved)
+              }
+              job.history.push(JSON.stringify(event))
+              for (const client of job.events) client.write(`data: ${JSON.stringify(event)}\n\n`)
+            },
+          })
           job.status = 'done'
         } catch (error) {
           if (error instanceof CrawlStoppedError) {
@@ -871,6 +926,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
           keywords: opts.keywords ?? [],
           items: counts?.items ?? 0,
           comments: counts?.comments ?? 0,
+          itemIds,
           status: job.status,
         }) + '\n', 'utf8').catch(() => {})
       })()
