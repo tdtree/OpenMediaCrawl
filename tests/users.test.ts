@@ -294,7 +294,7 @@ describe('sessions', () => {
 
   it('sessionCookie 生成合规的 Set-Cookie 值', () => {
     expect(SESSION_COOKIE).toBe('omc_session')
-    expect(sessionCookie('abc')).toBe('omc_session=abc; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800')
+    expect(sessionCookie('abc')).toBe('omc_session=abc; HttpOnly; Path=/; SameSite=Lax; Max-Age=315360000')
     expect(sessionCookie('abc', 60)).toBe('omc_session=abc; HttpOnly; Path=/; SameSite=Lax; Max-Age=60')
     expect(sessionCookie('abc', 0)).toBe('omc_session=abc; HttpOnly; Path=/; SameSite=Lax; Max-Age=0')
     // 生成的值能被自己的解析器读回来

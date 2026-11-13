@@ -28,7 +28,7 @@ describe('会话落盘', () => {
     expect(JSON.parse(await readFile(file, 'utf8'))[token]).toMatchObject({ username: 'alice' })
   })
 
-  it('过期会话不恢复；登出/停用会写回文件', async () => {
+  it('不做过期：很旧的 token 也照样恢复；登出/停用会写回文件', async () => {
     const file = await tempFile()
     const old = Date.now() - 8 * 24 * 3600 * 1000
     await writeFile(file, JSON.stringify({
@@ -36,7 +36,7 @@ describe('会话落盘', () => {
       live: { username: 'carol', created_at: Date.now() },
     }), 'utf8')
     restoreSessions(file)
-    expect(readSession('stale')).toBeNull()
+    expect(readSession('stale')?.username).toBe('bob')
     expect(readSession('live')?.username).toBe('carol')
 
     const token = createSession('dave')

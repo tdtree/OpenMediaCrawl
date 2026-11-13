@@ -8,6 +8,8 @@
 
 ### Added
 
+- 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
+
 - 会话落盘：`sessions.json`（与 `users.json` 同目录，容器里 `/data/omc/sessions.json`，权限 0600）——容器/进程重启后原来的登录 cookie 仍有效，不用重新登录；过期按 7 天判断，登出/停用会同步写回
 - 平台登录态本来就按用户存盘（`users/<名>/.catbus/auth/<平台>/web/<账号>.json`），文档补「重启不丢、cookie 失效才需要重新导入」
 

@@ -5,8 +5,8 @@ import { join } from 'node:path'
 /** 浏览器里的会话 cookie 名。 */
 export const SESSION_COOKIE = 'omc_session'
 
-/** 默认 7 天（秒）。 */
-const DEFAULT_MAX_AGE = 7 * 24 * 60 * 60
+/** 不主动过期：cookie 有效期给 10 年（Chrome 会按自己的上限截到 400 天）。 */
+const DEFAULT_MAX_AGE = 10 * 365 * 24 * 60 * 60
 
 export interface SessionInfo {
   username: string
@@ -15,10 +15,9 @@ export interface SessionInfo {
 
 /**
  * 会话表：内存 + 落盘（sessions.json，和 users.json 同目录）。
- * 落盘是为了容器/进程重启后不用重新登录；过期按 created_at + 7 天判断。
+ * 不做服务端过期：只有主动退出、被停用/删除账号或手动删 sessions.json 才失效。
  */
 const sessions = new Map<string, SessionInfo>()
-const SESSION_TTL_MS = DEFAULT_MAX_AGE * 1000
 let storeFile: string | null = null
 
 /** 指定落盘位置并读回未过期的会话；传 null 只保留内存（测试用）。 */
@@ -31,7 +30,6 @@ export function restoreSessions(file: string | null): void {
     const now = Date.now()
     for (const [token, info] of Object.entries(parsed)) {
       if (!info || typeof info.username !== 'string') continue
-      if (now - Number(info.created_at ?? 0) > SESSION_TTL_MS) continue
       sessions.set(token, { username: info.username, created_at: Number(info.created_at ?? now) })
     }
   } catch { /* 没有文件或坏文件：从空表开始 */ }

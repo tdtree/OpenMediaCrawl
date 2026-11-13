@@ -96,7 +96,7 @@ function applyLoginStage(login: LoginJob, chunk: string): void {
     login.message = '已确认，正在校验登录态'
   }
 }
-const SESSION_MAX_AGE = 7 * 24 * 3600
+const SESSION_MAX_AGE = 10 * 365 * 24 * 3600
 
 
 /** 扫一个用户目录，统计使用情况（给 admin 的账户面板用）。 */
