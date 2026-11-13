@@ -8,6 +8,11 @@
 
 ### Added
 
+- 账号自助注册 + 审核：登录页可申请（账号必须填真实姓名，2-30 位中文；密码自己设），新账号为 `pending`，管理员通过后才能登录
+- 用户状态 `pending/active/disabled`：登录按状态拒绝并给出原因；admin 可「通过 / 停用 / 启用 / 重置密码」，停用或改密会立即踢掉会话；旧 `users.json` 无 status 时按 active 兼容
+- 账号名同时支持中文真实姓名与机器名（小写字母/数字/_/-）；`verifyUser` 同步放开
+- 页脚整行去掉，GitHub 链接移到侧栏底部
+
 - 按 Web Interface Guidelines 做了无障碍/交互收口：新增跳转主内容链接、`<main>` 语义、toast `role=status aria-live`、`theme-color`、`text-wrap:balance`、`touch-action:manipulation`、`overscroll-behavior`、`prefers-reduced-motion`、移动端 40px 点按高度、评论卡片 `content-visibility`
 - 概览柱状图刻度统一为 `MM-DD`，移动端不再只显示日号
 

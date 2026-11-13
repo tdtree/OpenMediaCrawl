@@ -63,6 +63,19 @@ $('#loginForm').onsubmit=async function(ev){
   var d=Object.fromEntries(new FormData(ev.target));
   try{await post('/api/login',d);$('#loginMsg').textContent='';boot()}catch(e){$('#loginMsg').textContent=e.message}
 };
+$('#registerForm').onsubmit=async function(ev){
+  ev.preventDefault();
+  var d=Object.fromEntries(new FormData(ev.target));
+  var msg=$('#registerMsg');
+  if(String(d.username||'').trim().length<2){msg.textContent='请填真实姓名';return}
+  if(d.password!==d.confirm){msg.textContent='两次输入的密码不一样';return}
+  try{
+    var r=await post('/api/register',{username:d.username,password:d.password});
+    msg.textContent='已提交，等管理员通过「'+r.username+'」的申请后就能登录';
+    ev.target.reset();
+  }catch(e){msg.textContent=e.message}
+};
+
 $('#logout').onclick=async function(){
   try{await post('/api/logout',{})}catch(e){}
   omc.state.me=null;omc.shown={};showLogin();

@@ -5,10 +5,13 @@ import { CatbusError } from '../core/errors.js'
 import { isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
 
 export type Role = 'admin' | 'user'
+/** 自助注册的账号先 pending，admin 通过后才是 active。 */
+export type UserStatus = 'pending' | 'active' | 'disabled'
 
 export interface User {
   username: string
   role: Role
+  status: UserStatus
   password_hash: string
   created_at: string
 }
@@ -22,8 +25,10 @@ const SALT_BYTES = 16
 const PASSWORD_MIN = 8
 const PASSWORD_MAX = 128
 
-/** 3-32 位：小写字母/数字开头，后面可带下划线和短横线。 */
+/** 3-32 位：小写字母/数字开头，后面可带下划线和短横线（机器账号名）。 */
 const USERNAME_RE = /^[a-z0-9][a-z0-9_-]{2,31}$/
+/** 2-30 位中文姓名，允许间隔号（阿依古丽·买买提）。 */
+const REALNAME_RE = /^[一-龥][一-龥·]{1,29}$/
 const HEX_RE = /^(?:[0-9a-f]{2})+$/
 /** 生成随机初始密码用的字符集：去掉 0/O、1/l/I 这类看错的字符。 */
 const READABLE = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
@@ -46,10 +51,13 @@ export function usersFilePath(): string {
 
 export function checkUsername(name: string): string {
   const username = typeof name === 'string' ? name.trim() : ''
-  if (!USERNAME_RE.test(username)) {
-    throw new CatbusError('USAGE', '用户名不合法（3-32 位小写字母、数字、下划线或短横线，且以字母或数字开头）')
-  }
-  return username
+  if (REALNAME_RE.test(username) || USERNAME_RE.test(username)) return username
+  throw new CatbusError('USAGE', '账号需为真实姓名：2-30 位中文（可用间隔号），或 3-32 位小写字母/数字/下划线/短横线')
+}
+
+function checkStatus(status: unknown): UserStatus {
+  if (status === 'pending' || status === 'active' || status === 'disabled') return status
+  throw new CatbusError('USAGE', `未知状态：${String(status)}`)
 }
 
 function checkPassword(password: string): string {
@@ -94,10 +102,12 @@ function parseUsersFile(text: string | null): User[] {
   const users: User[] = []
   for (const item of list) {
     if (typeof item !== 'object' || item === null) throw corrupt()
-    const { username, role, password_hash: passwordHash, created_at: createdAt } = item as Record<string, unknown>
+    const { username, role, status, password_hash: passwordHash, created_at: createdAt } = item as Record<string, unknown>
     if (typeof username !== 'string' || typeof passwordHash !== 'string' || typeof createdAt !== 'string') throw corrupt()
     if (role !== 'admin' && role !== 'user') throw corrupt()
-    users.push({ username, role, password_hash: passwordHash, created_at: createdAt })
+    // 旧文件没有 status 字段：默认 active，避免升级后全员被锁在外面
+    if (status !== undefined && status !== 'pending' && status !== 'active' && status !== 'disabled') throw corrupt()
+    users.push({ username, role, status: (status as UserStatus | undefined) ?? 'active', password_hash: passwordHash, created_at: createdAt })
   }
   return users
 }
@@ -186,16 +196,17 @@ export async function listUsers(): Promise<User[]> {
   return (await readUsers()).map((user) => ({ ...user }))
 }
 
-export async function createUser(input: { username: string; password: string; role?: Role }): Promise<User> {
+export async function createUser(input: { username: string; password: string; role?: Role; status?: UserStatus }): Promise<User> {
   const username = checkUsername(input.username)
   const password = checkPassword(input.password)
   const role = checkRole(input.role ?? 'user')
+  const status = input.status ? checkStatus(input.status) : 'active'
   // 哈希放在队列外算，别让 scrypt 的几十毫秒堵住其他请求
   const password_hash = await hashPassword(password)
   return mutate(async () => {
     const users = await readUsers()
     if (users.some((user) => user.username === username)) throw new CatbusError('USAGE', '用户已存在')
-    const user: User = { username, role, password_hash, created_at: isoNow() }
+    const user: User = { username, role, status, password_hash, created_at: isoNow() }
     users.push(user)
     await saveUsers(users)
     return { ...user }
@@ -204,11 +215,26 @@ export async function createUser(input: { username: string; password: string; ro
 
 /** 校验密码；用户不存在、密码错误、哈希损坏都返回 null。 */
 export async function verifyUser(username: string, password: string): Promise<User | null> {
-  if (typeof username !== 'string' || !USERNAME_RE.test(username)) return null
+  if (typeof username !== 'string' || !(REALNAME_RE.test(username) || USERNAME_RE.test(username))) return null
   if (typeof password !== 'string' || password.length === 0) return null
   const user = (await readUsers()).find((item) => item.username === username)
   if (!user) return null
   return (await verifyPassword(password, user.password_hash)) ? { ...user } : null
+}
+
+export async function setStatus(username: string, status: UserStatus): Promise<User> {
+  const next = checkStatus(status)
+  return mutate(async () => {
+    const users = await readUsers()
+    const user = users.find((item) => item.username === username)
+    if (!user) throw new CatbusError('USAGE', '用户不存在')
+    if (user.role === 'admin' && next !== 'active' && users.filter((u) => u.role === 'admin' && u.status === 'active').length <= 1) {
+      throw new CatbusError('USAGE', '至少要保留一个可用的管理员')
+    }
+    user.status = next
+    await saveUsers(users)
+    return { ...user }
+  })
 }
 
 export async function setRole(username: string, role: Role): Promise<User> {

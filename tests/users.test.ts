@@ -108,7 +108,7 @@ describe('users', () => {
   })
 
   it('非法用户名抛 USAGE', async () => {
-    const bad = ['ab', 'a', '', 'A_bc', '-abc', 'abc def', '中文名字', 'a'.repeat(33)]
+    const bad = ['ab', 'a', '', 'A_bc', '-abc', 'abc def', '张', 'a'.repeat(33)]
     for (const username of bad) {
       expect(() => checkUsername(username)).toThrow(CatbusError)
       await expectCatbusError(makeUser(username), 'USAGE')
@@ -117,6 +117,9 @@ describe('users', () => {
     expect(checkUsername('abc')).toBe('abc')
     expect(checkUsername(' a_1-2 ')).toBe('a_1-2')
     expect(checkUsername('a'.repeat(32))).toBe('a'.repeat(32))
+    // 真实姓名：2-30 位中文，可用间隔号
+    expect(checkUsername('张三')).toBe('张三')
+    expect(checkUsername(' 阿依古丽·买买提 ')).toBe('阿依古丽·买买提')
     const user = await makeUser('z'.repeat(32), 'password123')
     expect(user.username.length).toBe(32)
   })
@@ -209,6 +212,7 @@ describe('users', () => {
     onDisk.users.push({
       username: 'second',
       role: 'user',
+      status: 'active',
       password_hash: onDisk.users[0].password_hash,
       created_at: onDisk.users[0].created_at,
     })

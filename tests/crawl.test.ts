@@ -523,6 +523,39 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('registers a real-name account, blocks it until approved, and lets admin reset the password', async () => {
+    const { ui, base } = await uiServer('omc-ui-reg-')
+    const login = (username: string, password: string) => fetch(`${base}/api/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    try {
+      const admin = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie: admin }
+
+      expect((await fetch(`${base}/api/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'a', password: 'passw0rd!' }) })).status).toBe(400)
+      const reg = await fetch(`${base}/api/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: '张三', password: 'passw0rd!' }) })
+      expect(reg.status).toBe(201)
+      expect((await reg.json() as { status: string }).status).toBe('pending')
+
+      expect((await login('张三', 'passw0rd!')).status).toBe(403)
+
+      const list = await (await fetch(`${base}/api/users`, { headers: { cookie: admin } })).json() as { users: Array<{ username: string; status: string }> }
+      expect(list.users.find((u) => u.username === '张三')?.status).toBe('pending')
+
+      expect((await fetch(`${base}/api/users/${encodeURIComponent('张三')}/status`, { method: 'POST', headers: auth, body: JSON.stringify({ status: 'active' }) })).status).toBe(200)
+      expect((await login('张三', 'passw0rd!')).status).toBe(200)
+
+      expect((await fetch(`${base}/api/users/${encodeURIComponent('张三')}/password`, { method: 'POST', headers: auth, body: JSON.stringify({ password: 'newpassw0rd!' }) })).status).toBe(200)
+      expect((await login('张三', 'passw0rd!')).status).toBe(401)
+      expect((await login('张三', 'newpassw0rd!')).status).toBe(200)
+
+      expect((await fetch(`${base}/api/users/${encodeURIComponent('张三')}/status`, { method: 'POST', headers: auth, body: JSON.stringify({ status: 'disabled' }) })).status).toBe(200)
+      expect((await login('张三', 'newpassw0rd!')).status).toBe(403)
+    } finally { await ui.close() }
+  })
+
   it('stops a running crawl job', async () => {
     const out = await tempDir('omc-ui-stop-')
     const home = await tempDir('omc-stop-home-')

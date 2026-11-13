@@ -28,6 +28,7 @@
 - 用户名规则 `/^[a-z0-9][a-z0-9_-]{2,31}$/`：3-32 位，小写字母或数字开头，可带 `_` 和 `-`。
 - 密码 8-128 位。
 - 角色只有 `admin` 和 `user`。删除用户、把 admin 降成 user 时都会检查：至少保留一个 admin。
+- 状态只有 `pending`（待审核）/ `active`（正常）/ `disabled`（停用）。自助注册的账号是 `pending`，登录会被 403 拒绝；admin 审核通过后变 `active`。旧版 `users.json` 没有 `status` 字段的，一律按 `active` 处理。
 - 每次请求都重新读文件，手工改完立刻生效；同一进程内的写入串行化，不会互相覆盖（跨进程不保证）。
 
 ## 首次启动
@@ -79,6 +80,9 @@ data/
 |---|---|---|
 | 改自己的密码 | 任何登录用户 | 左栏「我的账号」卡片；也可以直接调 `POST /api/users/<自己>/password`。改完当前会话立刻失效，要重新登录 |
 | 新建用户 | admin | 用户名、初始密码、角色（`user` / `admin`） |
+| 自助注册 | 公开 | 姓名（真实姓名）、密码；只能得到 `user` + `pending` |
+| 审核 / 停用 | admin | `POST /api/users/<姓名>/status`，body `{"status":"active"|"disabled"}` |
+| 重置密码 | admin | `POST /api/users/<姓名>/password`，会话立即失效 |
 | 升 / 降权 | admin | 降最后一个 admin 会被拒绝 |
 | 删除用户 | admin | 只删用户记录，`users/<用户名>/` 下的数据不删 |
 

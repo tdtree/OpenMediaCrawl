@@ -78,7 +78,7 @@ const HTML = String.raw`
     <div class="row"><h3>用户管理</h3><span class="spacer"></span><span class="tiny" id="accountUsersMsg"></span></div>
     <div class="tbl-wrap" style="margin-top:8px">
       <table class="tbl account-tbl">
-        <thead><tr><th>用户名</th><th>角色</th><th>操作</th></tr></thead>
+        <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="accountUserList"></tbody>
       </table>
     </div>
@@ -337,17 +337,23 @@ async function accountLoadSettings(){
 /* ---------------------------------------------------------------- ③ 用户 */
 async function accountLoadUsers(){
   var tb=$('#accountUserList');if(!tb)return;
-  if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="3"><p class="loading">读取中…</p></td></tr>';
+  if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="4"><p class="loading">读取中…</p></td></tr>';
   try{
     var r=await api('/api/users');
     var me=(omc.state.me||{}).username;
     var list=r.users||[];
     tb.innerHTML=list.map(function(u){
       var self=u.username===me;
+      var st=u.status||'active';
+      var stBadge=st==='pending'?'<span class="badge warn">待审核</span>':st==='disabled'?'<span class="badge err">已停用</span>':'<span class="badge ok">正常</span>';
       return '<tr>'+
         '<td data-label="用户名">'+esc(u.username)+(self?' <span class="badge">我</span>':'')+'</td>'+
         '<td data-label="角色"><span class="badge'+(u.role==='admin'?' warn':'')+'">'+esc(u.role)+'</span></td>'+
+        '<td data-label="状态">'+stBadge+'</td>'+
         '<td data-label="操作"><div class="row">'+
+          (st==='pending'?'<button class="sm primary" type="button" data-account-status="'+esc(u.username)+'" data-account-st="active">通过</button>'
+            :st==='active'?'<button class="sm ghost" type="button" data-account-status="'+esc(u.username)+'" data-account-st="disabled">停用</button>'
+            :'<button class="sm ghost" type="button" data-account-status="'+esc(u.username)+'" data-account-st="active">启用</button>')+
           (u.role==='admin'
             ?'<button class="sm ghost" type="button" data-account-role="'+esc(u.username)+'" data-account-to="user">设为 user</button>'
             :'<button class="sm ghost" type="button" data-account-role="'+esc(u.username)+'" data-account-to="admin">设为 admin</button>')+
@@ -356,7 +362,9 @@ async function accountLoadUsers(){
         '</div></td></tr>';
     }).join('');
     tb.dataset.loaded='1';
-    $('#accountUsersMsg').textContent='共 '+list.length+' 个用户';
+    var pending=list.filter(function(u){return (u.status||'active')==='pending'}).length;
+    $('#accountUsersMsg').textContent='共 '+list.length+' 个用户'+(pending?'，其中 '+pending+' 个待审核':'');
+    $$('button[data-account-status]',tb).forEach(function(b){b.onclick=function(){accountSetStatus(b)}});
     $$('button[data-account-role]',tb).forEach(function(b){b.onclick=function(){accountSetRole(b)}});
     $$('button[data-account-pw]',tb).forEach(function(b){b.onclick=function(){accountOpenPwReset(b.dataset.accountPw)}});
     $$('button[data-account-del]',tb).forEach(function(b){b.onclick=function(){accountDeleteUser(b)}});
@@ -364,6 +372,19 @@ async function accountLoadUsers(){
     $('#accountUsersMsg').textContent='用户列表读取失败：'+e.message;
     if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="3"><p class="empty">'+esc(e.message)+'</p></td></tr>';
   }
+}
+
+async function accountSetStatus(btn){
+  var name=btn.dataset.accountStatus;
+  var to=btn.dataset.accountSt;
+  accountBtn(btn,true,'处理中…');
+  $('#accountUsersMsg').textContent='正在'+(to==='active'?'通过 / 启用':'停用')+' '+name+'…';
+  try{
+    await post('/api/users/'+encodeURIComponent(name)+'/status',{status:to});
+    $('#accountUsersMsg').textContent=(to==='active'?'已通过 ':'已停用 ')+name+(to==='active'?'，对方现在可以登录。':'，对方已无法登录。');
+    await accountLoadUsers();
+  }catch(e){$('#accountUsersMsg').textContent=e.message}
+  finally{accountBtn(btn,false)}
 }
 
 async function accountSetRole(btn){

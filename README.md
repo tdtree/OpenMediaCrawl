@@ -178,7 +178,9 @@ mediacrawl ui --port 8080     # 打开 http://127.0.0.1:8080
 
 ### 多用户
 
-每个用户的采集数据在 `<--out>/users/<用户名>/`，登录态在自己的 `users/<用户名>/.catbus/`，互相看不到；admin 能看所有人的任务和文件，也能在页面里新建 / 删除用户、升降权（至少保留一个 admin）。用户存在 `<OMC_HOME|~/.openmediacrawl>/users.json`，密码只存 scrypt 哈希；会话在内存里，进程重启后要重新登录。规则、接口和安全边界见 [docs/guide/users.md](docs/guide/users.md)。
+每个用户的采集数据在 `<--out>/users/<用户名>/`，登录态在自己的 `users/<用户名>/.catbus/`，互相看不到。
+
+账号有三种状态：**待审核 / 正常 / 停用**。登录页可以自助申请（账号填真实姓名、密码自己设），提交后是「待审核」，管理员在「账号与设置 → 用户」里点「通过」才能登录；管理员也可以停用、启用、重置密码、升降权（至少保留一个 admin）。用户存在 `<OMC_HOME|~/.openmediacrawl>/users.json`，密码只存 scrypt 哈希；会话在内存里，进程重启后要重新登录。规则、接口和安全边界见 [docs/guide/users.md](docs/guide/users.md)。
 
 ## 🤖 单条命令 & AI Agent
 

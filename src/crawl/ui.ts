@@ -16,7 +16,7 @@ import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
-import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, verifyUser, type Role } from './users.js'
+import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, verifyUser, type Role, type UserStatus } from './users.js'
 import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, sessionCookie } from './sessions.js'
 import { PLATFORMS, findPlatform } from '../platforms/index.js'
 
@@ -99,6 +99,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
   const logins = new Map<string, LoginJob>()
   const campaigns = new Map<string, { state: CampaignState; controller: AbortController }>()
   const failures = new Map<string, { count: number; until: number }>()
+  const registrations = new Map<string, number[]>()
 
   const userRoot = (username: string) => join(base, 'users', username)
   const userHome = (username: string) => join(userRoot(username), '.catbus')
@@ -167,6 +168,21 @@ export async function startUiServer(options: { port?: number; host?: string; out
     // ---------------------------------------------------------------- 公开
     if (req.method === 'GET' && url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', renderPage())
 
+    if (req.method === 'POST' && url.pathname === '/api/register') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const ip = req.socket.remoteAddress ?? 'local'
+      const now = Date.now()
+      const recent = (registrations.get(ip) ?? []).filter((at) => now - at < 60 * 60 * 1000)
+      if (recent.length >= 5) return json(res, { error: '注册太频繁，1 小时后再试' }, 429)
+      try {
+        const created = await createUser({ username: String(input.username ?? ''), password: String(input.password ?? ''), role: 'user', status: 'pending' })
+        await mkdir(userHome(created.username), { recursive: true })
+        registrations.set(ip, [...recent, now])
+        return json(res, { ok: true, username: created.username, status: created.status }, 201)
+      } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/login') {
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
@@ -181,6 +197,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
         failures.set(username, next)
         return json(res, { error: '用户名或密码不对' }, 401)
       }
+      if (user.status === 'pending') return json(res, { error: '账号等待管理员审核，通过后才能登录' }, 403)
+      if (user.status === 'disabled') return json(res, { error: '账号已停用，请联系管理员' }, 403)
       failures.delete(username)
       res.setHeader('set-cookie', sessionCookie(createSession(user.username), SESSION_MAX_AGE))
       return json(res, { username: user.username, role: user.role })
@@ -319,7 +337,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
     // ---------------------------------------------------------------- 用户管理
     if (url.pathname === '/api/users' && req.method === 'GET') {
       if (user.role !== 'admin') return json(res, { error: '只有 admin 能看用户列表' }, 403)
-      return json(res, { users: (await listUsers()).map(({ username, role, created_at }) => ({ username, role, created_at })) })
+      return json(res, { users: (await listUsers()).map(({ username, role, status, created_at }) => ({ username, role, status, created_at })) })
     }
     if (url.pathname === '/api/users' && req.method === 'POST') {
       if (user.role !== 'admin') return json(res, { error: '只有 admin 能建用户' }, 403)
@@ -331,7 +349,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
         return json(res, { username: created.username, role: created.role }, 201)
       } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
     }
-    const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)(\/role|\/password)?$/)
+    const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)(\/role|\/password|\/status)?$/)
     if (userMatch) {
       if (user.role !== 'admin' && decodeURIComponent(userMatch[1]!) !== user.username) return json(res, { error: '没有权限' }, 403)
       const target = decodeURIComponent(userMatch[1]!)
@@ -340,6 +358,16 @@ export async function startUiServer(options: { port?: number; host?: string; out
         if (user.role !== 'admin') return json(res, { error: '没有权限' }, 403)
         try { await removeUser(target); dropUserSessions(target) } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
         return json(res, { ok: true })
+      }
+      if (req.method === 'POST' && action === '/status') {
+        if (user.role !== 'admin') return json(res, { error: '没有权限' }, 403)
+        let input: Record<string, unknown>
+        try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+        try {
+          const updated = await setStatus(target, String(input.status ?? '') as UserStatus)
+          if (updated.status !== 'active') dropUserSessions(target)
+          return json(res, { username: updated.username, status: updated.status })
+        } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
       }
       if (req.method === 'POST' && action === '/role') {
         if (user.role !== 'admin') return json(res, { error: '没有权限' }, 403)
