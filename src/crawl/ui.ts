@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { isoNow } from '../core/fsutil.js'
 import { appendFile, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { relative } from 'node:path'
-import { extname, join, resolve, sep } from 'node:path'
+import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { CrawlPlatform, CrawlPlatformClient } from './types.js'
 import { runCrawl, CrawlStoppedError } from './job.js'
@@ -22,8 +22,8 @@ import { DEFAULT_SEND_CONFIG, loadSendConfig, saveSendConfig } from './send-conf
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
-import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, verifyUser, type Role, type UserStatus } from './users.js'
-import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, sessionCookie } from './sessions.js'
+import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, usersFilePath, verifyUser, type Role, type UserStatus } from './users.js'
+import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, restoreSessions, sessionCookie } from './sessions.js'
 import { PLATFORMS, findPlatform } from '../platforms/index.js'
 
 const STAR = '⭐ If OpenMediaCrawl helped you, please star https://github.com/Tommyapi/OpenMediaCrawl — donations: see README "Support".'
@@ -193,6 +193,8 @@ async function userActivity(base: string, username: string, days: number): Promi
 export async function startUiServer(options: { port?: number; host?: string; out?: string; clientFactory?: (platform: CrawlPlatform, extra: { sort?: string; env?: NodeJS.ProcessEnv }) => CrawlPlatformClient } = {}): Promise<UiHandle> {
   const host = options.host ?? '127.0.0.1'
   const base = resolve(options.out ?? './data')
+  // 会话落盘：进程/容器重启后原来的 cookie 仍然有效，不用重新登录。
+  restoreSessions(join(dirname(usersFilePath()), 'sessions.json'))
   const jobs = new Map<string, Job>()
   const logins = new Map<string, LoginJob>()
   const campaigns = new Map<string, { state: CampaignState; controller: AbortController }>()
