@@ -1012,6 +1012,7 @@ export const admin: View = {
     adminClean.msgKind=removed>0?'ok':'';
     adminCleanMsgPaint();
     toast('已删 '+num(removed)+' 条，释放 '+adminBytes(freed),removed>0?'':'');
+    if(typeof refreshAdminBadge==='function')refreshAdminBadge();
     adminCleanLoad();
   }
 
