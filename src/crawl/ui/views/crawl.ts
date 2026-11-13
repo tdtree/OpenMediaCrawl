@@ -18,6 +18,13 @@ export const crawl: View = {
 .crawl-form .field>span{font-size:var(--fs-xs);line-height:1.7}
 .crawl-form input,.crawl-form select{min-height:30px;padding:3px 8px;font-size:var(--fs-sm)}
 .crawl-form .crawl-group+.crawl-group{margin-top:var(--s3);padding-top:var(--s3)}
+.crawl-basic{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2) var(--s3)}
+.crawl-basic #crawlFieldIds,.crawl-basic #crawlFieldCreators,.crawl-basic .crawl-chip-field{grid-column:1/-1}
+.crawl-chip-n{margin:0 0 0 2px}
+.crawl-sub{display:flex;align-items:center;gap:var(--s3)}
+.crawl-sub .crawl-hint{flex:1;margin:0;min-width:0}
+@media(max-width:1100px){.crawl-basic{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.crawl-basic{grid-template-columns:1fr}}
 .crawl-form .crawl-gt{margin-bottom:var(--s1)}
 .crawl-form .crawl-sub{margin-top:var(--s3)}
 #crawlMax,#crawlMaxComments,#crawlSleep{max-width:150px}
@@ -31,8 +38,8 @@ export const crawl: View = {
 .crawl-adv-body{align-items:start}
 .crawl-adv-body .crawl-wide{grid-column:1/-1}
 .crawl-checks{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);padding-top:var(--s3)}
-.crawl-sub{display:flex;justify-content:flex-end;margin-top:var(--s4)}
-.crawl-sub .primary{width:160px;flex:none}
+.crawl-sub{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s3)}
+.crawl-sub .primary{width:140px;flex:none}
 .crawl-msg{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--s2);min-height:1.2em}
 .crawl-msg.err{color:var(--danger)}
 .crawl-msg.ok{color:var(--ok)}
@@ -41,7 +48,7 @@ export const crawl: View = {
 .crawl-chip-field{grid-column:1/-1}
 .crawl-chip-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap;min-height:24px}
 .crawl-chip-head>span:first-child{color:var(--muted);font-size:var(--fs-sm)}
-.crawl-chip-field.req .crawl-chip-head>span:first-child::after{content:" *";color:var(--danger)}
+.crawl-chip-field.req .crawl-chip-label::after{content:" *";color:var(--danger)}
 .crawl-chip-acts{display:flex;gap:var(--s1);margin-left:auto}
 .crawl-chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1);padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--card);min-height:38px;cursor:text}
 .crawl-chips:focus-within{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-soft)}
@@ -57,7 +64,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .crawl-tools{display:flex;align-items:flex-end;gap:var(--s2);margin-left:auto}
 .crawl-tools .field{min-width:150px}
 .crawl-md{display:grid;grid-template-columns:320px minmax(0,1fr);gap:var(--s3);align-items:start}
-.crawl-list{padding:0;max-height:min(72vh,760px);overflow:auto}
+.crawl-list{padding:0;max-height:min(72vh,760px);overflow:auto;overscroll-behavior:contain}
 .crawl-list .loading,.crawl-list .empty{margin:0}
 .crawl-it{display:block;width:100%;min-height:0;padding:var(--s2) var(--s3);border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .crawl-it:last-child{border-bottom:0}
@@ -66,7 +73,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .crawl-it-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:var(--fs-sm);line-height:1.4;word-break:break-word}
 .crawl-it-m{display:flex;flex-wrap:wrap;gap:0 var(--s2);margin-top:2px;font-size:var(--fs-xs);color:var(--muted)}
 .crawl-it[aria-current=true] .crawl-it-m{color:var(--acc-ink);opacity:.85}
-.crawl-detail{min-height:420px;max-height:min(72vh,760px);overflow:auto}
+.crawl-detail{min-height:420px;max-height:min(72vh,760px);overflow:auto;overscroll-behavior:contain}
 .crawl-dt-head{display:flex;gap:var(--s3);align-items:flex-start}
 .crawl-dt-t{min-width:0}
 .crawl-dt-t h3{font-size:var(--fs-lg);line-height:1.35;word-break:break-word}
@@ -111,7 +118,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
   <form class="card crawl-form" id="crawlForm" novalidate>
     <div class="crawl-group">
       <div class="crawl-gt">基础</div>
-      <div class="grid2">
+      <div class="crawl-basic">
         <label class="field req"><span>平台</span><select id="crawlPlatform" name="platform"></select></label>
         <label class="field req"><span>类型</span>
           <select id="crawlType" name="type">
@@ -120,29 +127,23 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
             <option value="creator">指定博主</option>
           </select>
         </label>
+        <label class="field"><span>最多条数</span><input id="crawlMax" name="maxItems" type="number" min="1" step="1" value="20"></label>
+        <label class="field"><span>排序</span><input id="crawlSort" name="sort" placeholder="如 latest，可留空…"></label>
+        <label class="field req" id="crawlFieldIds" hidden><span>作品 ID / 链接</span><input id="crawlIds" name="ids" autocomplete="off" placeholder="逗号分隔，可整条粘贴…"></label>
+        <label class="field req" id="crawlFieldCreators" hidden><span>博主 ID / 链接</span><input id="crawlCreators" name="creators" placeholder="逗号分隔，可粘主页链接…"></label>
         <div class="field req crawl-chip-field" id="crawlFieldKeywords">
           <div class="crawl-chip-head">
-            <span>关键词</span>
+            <span><span class="crawl-chip-label">关键词</span> <span class="tiny crawl-chip-n" id="crawlKwN">共 0 个词</span></span>
             <span class="crawl-chip-acts">
               <button class="ghost sm" type="button" id="crawlKwImport">从词库导入</button>
               <button class="ghost sm" type="button" id="crawlKwClear">清空</button>
             </span>
           </div>
           <div class="crawl-chips" id="crawlKwChips" data-crawl-chips="kw">
-            <input id="crawlKeywordsInput" class="crawl-chip-in" autocomplete="off" placeholder="空格 / 逗号 / 回车切词，或点右上「从词库导入」">
+            <input id="crawlKeywordsInput" class="crawl-chip-in" autocomplete="off" placeholder="空格 / 逗号 / 回车切词，或点右上导入…">
           </div>
           <input type="hidden" id="crawlKeywords" name="keywords" value="">
-          <p class="tiny crawl-chip-n" id="crawlKwN">共 0 个词</p>
         </div>
-      </div>
-    </div>
-    <div class="crawl-group">
-      <div class="crawl-gt">范围</div>
-      <div class="grid3">
-        <label class="field req" id="crawlFieldIds" hidden><span>作品 ID / 链接</span><input id="crawlIds" name="ids" autocomplete="off" placeholder="逗号分隔，可整条粘贴…"></label>
-        <label class="field req" id="crawlFieldCreators" hidden><span>博主 ID / 链接</span><input id="crawlCreators" name="creators" placeholder="逗号分隔，可粘主页链接"></label>
-        <label class="field"><span>最多条数</span><input id="crawlMax" name="maxItems" type="number" min="1" step="1" value="20"></label>
-        <label class="field"><span>排序</span><input id="crawlSort" name="sort" placeholder="如 latest，可留空"></label>
       </div>
     </div>
     <details class="crawl-adv" id="crawlAdv">
@@ -169,9 +170,11 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       <p class="hint">二级评论要先勾「评论」；间隔写 2-5 表示每条之间随机 2~5 秒。</p>
       <p class="hint">每视频评论上限填 0 表示把该作品下所有一级评论都拉完（含自动翻页）；二级评论仍按需拉取。</p>
     </details>
-    <div class="crawl-sub"><button class="primary" id="crawlStart" type="submit">开始采集</button></div>
+    <div class="crawl-sub">
+      <span class="hint crawl-hint">中断后重跑同一条命令：跑完的关键词整段跳过，没跑完的从上次翻页的位置继续。</span>
+      <button class="primary" id="crawlStart" type="submit">开始采集</button>
+    </div>
     <p class="crawl-msg" id="crawlFormMsg"></p>
-    <p class="hint">中断后重跑同一条命令：跑完的关键词整段跳过，没跑完的从上次翻页的位置继续。</p>
   </form>
 </section>
 
@@ -459,7 +462,7 @@ function crawlEmptyComments(){
 function crawlItemHtml(it){
   var st=it.stats||{};
   return '<button type="button" class="crawl-it" data-crawl-item="'+esc(it.id)+'">'+
-    '<span class="crawl-it-t">'+esc(it.title||it.id)+'</span>'+
+    '<span class="crawl-it-t">'+esc(it.title||'（无标题）')+'</span>'+
     '<span class="crawl-it-m"><span>'+esc(it.author||'未知作者')+'</span>'+
       '<span>赞 '+num(st.likes)+'</span>'+
       '<span>评 '+num(it.comments)+'</span></span>'+
@@ -476,13 +479,13 @@ function crawlRenderDetail(it){
   var box=$('#crawlDetail');
   if(!box)return;
   var st=it.stats||{};
-  var cover=it.cover?'<img class="crawl-cover" src="'+esc(it.cover)+'" alt="" loading="lazy">':'';
+  var cover=it.cover?'<img class="crawl-cover" src="'+esc(it.cover)+'" alt="" width="96" height="96" loading="lazy">':'';
   var line=[it.author||'未知作者',it.created_at?fmtTime(it.created_at):''].filter(Boolean).join(' · ');
   var cells=[['阅读',st.views],['点赞',st.likes],['评论',it.comments],['收藏',st.collects]].map(function(c){
     return '<div><span>'+c[0]+'</span><b>'+num(c[1])+'</b></div>';
   }).join('');
   box.innerHTML='<div class="crawl-dt-head">'+cover+
-    '<div class="crawl-dt-t"><h3>'+esc(it.title||it.id)+'</h3>'+
+    '<div class="crawl-dt-t"><h3>'+esc(it.title||'（无标题）')+'</h3>'+
       '<p class="sub">'+esc(line)+'</p>'+
       (it.url?'<p class="tiny"><a href="'+esc(it.url)+'" target="_blank" rel="noopener">打开原页 ↗</a></p>':'<p class="tiny">没有原页链接</p>')+
     '</div></div>'+
@@ -491,15 +494,14 @@ function crawlRenderDetail(it){
       '<div class="crawl-dt-ch"><h3>评论</h3><span class="badge" id="crawlCmCount">读取中…</span></div>'+
       '<div class="crawl-cm-bar" id="crawlCmBar" hidden>'+
         '<div class="field crawl-cm-q crawl-chip-field">'+
-          '<div class="crawl-chip-head"><span>评论筛选</span>'+
+          '<div class="crawl-chip-head"><span>评论筛选 <span class="tiny crawl-chip-n" id="crawlCmFilterN">共 0 个词</span></span>'+
             '<span class="crawl-chip-acts">'+
               '<button class="ghost sm" id="crawlCmImport" type="button">从词库导入</button>'+
               '<button class="ghost sm" id="crawlCmClear" type="button">清空</button>'+
             '</span></div>'+
           '<div class="crawl-chips" id="crawlCmChips" data-crawl-chips="filter">'+
-            '<input id="crawlCmFilter" class="crawl-chip-in" type="text" autocomplete="off" placeholder="空格或 / 切词，命中任一即显示">'+
+            '<input id="crawlCmFilter" class="crawl-chip-in" type="text" autocomplete="off" placeholder="空格或 / 切词，命中任一即显示…">'+
           '</div>'+
-          '<p class="tiny crawl-chip-n" id="crawlCmFilterN">共 0 个词</p>'+
         '</div>'+
         '<span class="tiny crawl-cm-hit" id="crawlCmHit">命中 0 条 / 共 0 条</span>'+
       '</div>'+
