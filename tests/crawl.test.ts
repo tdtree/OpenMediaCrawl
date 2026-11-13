@@ -556,6 +556,43 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('stores a per-user lexicon, lists chat threads, and exposes usage to admins only', async () => {
+    const { ui, base } = await uiServer('omc-ui-lex-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      expect(await (await fetch(`${base}/api/lexicon`, { headers: { cookie } })).json()).toEqual({ keywords: [], filters: [] })
+      const saved = await (await fetch(`${base}/api/lexicon`, { method: 'POST', headers: auth, body: JSON.stringify({ keywords: '消防 贷款，消防', filters: ['价格'] }) })).json()
+      expect(saved).toEqual({ keywords: ['消防', '贷款'], filters: ['价格'] })
+      expect(await (await fetch(`${base}/api/lexicon`, { headers: { cookie } })).json()).toEqual(saved)
+
+      const usage = await fetch(`${base}/api/admin/usage`, { headers: { cookie } })
+      expect(usage.status).toBe(200)
+      const body = await usage.json() as { users: Array<{ username: string; bytes: number; leads: number }> }
+      expect(body.users[0]).toMatchObject({ username: 'admin' })
+      expect(typeof body.users[0]!.bytes).toBe('number')
+
+      await fetch(`${base}/api/users`, { method: 'POST', headers: auth, body: JSON.stringify({ username: 'bob', password: 'password123', role: 'user' }) })
+      const bobLogin = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'bob', password: 'password123' }) })
+      const bobCookie = bobLogin.headers.get('set-cookie')!.split(';')[0]!
+      expect((await fetch(`${base}/api/admin/usage`, { headers: { cookie: bobCookie } })).status).toBe(403)
+
+      const activity = await fetch(`${base}/api/admin/activity?days=7`, { headers: { cookie } })
+      expect(activity.status).toBe(200)
+      const actBody = await activity.json() as { days: number; users: Array<{ username: string; totals: { comments: number }; days: unknown[] }> }
+      expect(actBody.days).toBe(7)
+      expect(actBody.users.map((u) => u.username)).toContain('admin')
+      expect(typeof actBody.users[0]!.totals.comments).toBe('number')
+      expect((await fetch(`${base}/api/admin/activity`, { headers: { cookie: bobCookie } })).status).toBe(403)
+
+      expect(await (await fetch(`${base}/api/chat/threads`, { headers: { cookie } })).json()).toEqual({ threads: [] })
+      expect((await fetch(`${base}/api/chat/messages`, { headers: { cookie } })).status).toBe(400)
+      expect((await fetch(`${base}/api/chat/send`, { method: 'POST', headers: auth, body: JSON.stringify({ platform: 'douyin', peerId: '', text: 'x' }) })).status).toBe(400)
+      expect((await fetch(`${base}/api/chat/send`, { method: 'POST', headers: auth, body: JSON.stringify({ platform: 'douyin', peerId: 'u1', text: '' }) })).status).toBe(400)
+      expect((await fetch(`${base}/api/chat/sync`, { method: 'POST', headers: auth, body: JSON.stringify({ platform: 'nope', peerId: 'u1' }) })).status).toBe(400)
+    } finally { await ui.close() }
+  })
+
   it('stops a running crawl job', async () => {
     const out = await tempDir('omc-ui-stop-')
     const home = await tempDir('omc-stop-home-')

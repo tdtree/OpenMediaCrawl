@@ -34,6 +34,7 @@ export const APP_HTML = `
       <button class="nav-item" data-go="leads">线索</button>
       <button class="nav-item" data-go="reach">触达</button>
       <button class="nav-item" data-go="account">账号与设置</button>
+      <button class="nav-item" data-go="admin" id="navAdmin" hidden>用户管理</button>
       <div class="side-foot">
         <span class="who tiny" id="who"></span>
         <button class="ghost sm" id="logout">退出登录</button>

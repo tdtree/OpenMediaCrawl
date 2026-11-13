@@ -1,18 +1,22 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { isoNow } from '../core/fsutil.js'
+import { appendFile, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { relative } from 'node:path'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { CrawlPlatform, CrawlPlatformClient } from './types.js'
 import { runCrawl, CrawlStoppedError } from './job.js'
 import { CRAWL_PLATFORMS, CRAWL_TYPES, normalizeCrawlOptions } from './config.js'
-import { createSubprocessClient } from './client.js'
+import { createSubprocessClient, runCatbus } from './client.js'
 import { renderPage } from './ui/index.js'
 import { ACTION_PLATFORMS, runAction, type ActionKind } from './actions.js'
 import { loadIndex, threadOf } from './records.js'
 import { LeadStore, buildLeads, toCsv } from './leads.js'
 import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
+import { loadLexicon, saveLexicon, sanitizeLexicon } from './lexicon.js'
+import { appendChat, hasMessage, listChat, listThreads } from './chat.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
@@ -91,6 +95,98 @@ function applyLoginStage(login: LoginJob, chunk: string): void {
   }
 }
 const SESSION_MAX_AGE = 7 * 24 * 3600
+
+
+/** 扫一个用户目录，统计使用情况（给 admin 的账户面板用）。 */
+async function scanUsage(base: string, name: string): Promise<{ items: number; comments: number; leads: number; sent: number; bytes: number; authBytes: number; logins: number; lastActive: string | null }> {
+  const dir = join(base, 'users', name)
+  const out = { items: 0, comments: 0, leads: 0, sent: 0, bytes: 0, authBytes: 0, logins: 0, lastActive: null as string | null }
+  let entries
+  try { entries = await readdir(dir, { recursive: true, withFileTypes: true }) } catch { return out }
+  let last = 0
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const full = join(entry.parentPath ?? dir, entry.name)
+    const info = await stat(full).catch(() => null)
+    if (!info) continue
+    const rel = relative(dir, full).split(sep).join('/')
+    last = Math.max(last, info.mtimeMs)
+    if (rel.startsWith('.catbus/')) {
+      out.authBytes += info.size
+      if (rel.includes('/auth/') && rel.endsWith('.json')) out.logins++
+      continue
+    }
+    out.bytes += info.size
+    if (!rel.endsWith('.jsonl')) continue
+    const lines = (await readFile(full, 'utf8').catch(() => '')).split('\n').filter((line) => line.trim()).length
+    if (rel.includes('comment')) out.comments += lines
+    else if (rel.includes('item')) out.items += lines
+    if (rel === 'leads.jsonl') out.leads = lines
+    if (rel === 'sent.jsonl') out.sent = lines
+  }
+  out.lastActive = last ? new Date(last).toISOString() : null
+  return out
+}
+
+
+/** 读 jsonl，坏行跳过；用于 admin 的按天统计。 */
+async function readRows(file: string): Promise<Array<Record<string, unknown>>> {
+  const raw = await readFile(file, 'utf8').catch(() => '')
+  const rows: Array<Record<string, unknown>> = []
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    try { rows.push(JSON.parse(line) as Record<string, unknown>) } catch { /* 跳过坏行 */ }
+  }
+  return rows
+}
+
+interface DayStat { date: string; keywords: string[]; items: number; comments: number; sent: number; customers: string[] }
+
+/** 某个用户最近 N 天的抓取 / 群发 / 沟通统计（按本地日期切）。 */
+async function userActivity(base: string, username: string, days: number): Promise<{ days: DayStat[]; totals: { items: number; comments: number; sent: number; customers: number; activeDays: number } }> {
+  const dir = join(base, 'users', username)
+  const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString().slice(0, 10)
+  const map = new Map<string, { keywords: Set<string>; items: number; comments: number; sent: number; customers: Set<string> }>()
+  const bucket = (date: string) => {
+    let row = map.get(date)
+    if (!row) { row = { keywords: new Set(), items: 0, comments: 0, sent: 0, customers: new Set() }; map.set(date, row) }
+    return row
+  }
+  for (const job of await readRows(join(dir, 'jobs.jsonl'))) {
+    const date = String(job.at ?? '').slice(0, 10)
+    if (!date || date < cutoff) continue
+    const row = bucket(date)
+    for (const word of Array.isArray(job.keywords) ? job.keywords : []) row.keywords.add(String(word))
+    row.items += Number(job.items ?? 0)
+    row.comments += Number(job.comments ?? 0)
+  }
+  for (const sent of await readRows(join(dir, 'sent.jsonl'))) {
+    const date = String(sent.at ?? '').slice(0, 10)
+    if (!date || date < cutoff || sent.ok !== true) continue
+    bucket(date).sent += 1
+  }
+  for (const message of await readRows(join(dir, 'chat.jsonl'))) {
+    const date = String(message.at ?? '').slice(0, 10)
+    if (!date || date < cutoff) continue
+    const peer = String(message.peerId ?? '')
+    if (peer) bucket(date).customers.add(peer)
+  }
+  const list: DayStat[] = [...map.entries()]
+    .map(([date, row]) => ({ date, keywords: [...row.keywords], items: row.items, comments: row.comments, sent: row.sent, customers: [...row.customers] }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+  const customers = new Set<string>()
+  for (const day of list) for (const peer of day.customers) customers.add(peer)
+  return {
+    days: list,
+    totals: {
+      items: list.reduce((sum, day) => sum + day.items, 0),
+      comments: list.reduce((sum, day) => sum + day.comments, 0),
+      sent: list.reduce((sum, day) => sum + day.sent, 0),
+      customers: customers.size,
+      activeDays: list.filter((day) => day.items || day.comments || day.sent || day.customers.length).length,
+    },
+  }
+}
 
 export async function startUiServer(options: { port?: number; host?: string; out?: string; clientFactory?: (platform: CrawlPlatform, extra: { sort?: string; env?: NodeJS.ProcessEnv }) => CrawlPlatformClient } = {}): Promise<UiHandle> {
   const host = options.host ?? '127.0.0.1'
@@ -335,6 +431,26 @@ export async function startUiServer(options: { port?: number; host?: string; out
     }
 
     // ---------------------------------------------------------------- 用户管理
+    if (url.pathname === '/api/admin/activity' && req.method === 'GET') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
+      const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days') ?? 14)))
+      const users = await listUsers()
+      const rows = []
+      for (const item of users) {
+        const activity = await userActivity(base, item.username, days)
+        rows.push({ username: item.username, role: item.role, status: item.status, totals: activity.totals, days: activity.days })
+      }
+      return json(res, { days, users: rows })
+    }
+    if (url.pathname === '/api/admin/usage' && req.method === 'GET') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
+      const users = await listUsers()
+      const rows = []
+      for (const item of users) {
+        rows.push({ username: item.username, role: item.role, status: item.status, created_at: item.created_at, ...(await scanUsage(base, item.username)) })
+      }
+      return json(res, { users: rows })
+    }
     if (url.pathname === '/api/users' && req.method === 'GET') {
       if (user.role !== 'admin') return json(res, { error: '只有 admin 能看用户列表' }, 403)
       return json(res, { users: (await listUsers()).map(({ username, role, status, created_at }) => ({ username, role, status, created_at })) })
@@ -557,6 +673,77 @@ export async function startUiServer(options: { port?: number; host?: string; out
       }
       return json(res, { added, skipped })
     }
+    if (url.pathname === '/api/lexicon' && req.method === 'GET') return json(res, await loadLexicon(root))
+    if (url.pathname === '/api/lexicon' && req.method === 'POST') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      return json(res, await saveLexicon(root, sanitizeLexicon({ keywords: input.keywords as string[], filters: input.filters as string[] })))
+    }
+
+    if (url.pathname === '/api/chat/threads' && req.method === 'GET') return json(res, { threads: await listThreads(root) })
+    if (url.pathname === '/api/chat/messages' && req.method === 'GET') {
+      const platform = String(url.searchParams.get('platform') ?? '')
+      const peerId = String(url.searchParams.get('peerId') ?? '')
+      if (!platform || !peerId) return json(res, { error: '需要 platform 和 peerId' }, 400)
+      return json(res, { platform, peerId, messages: await listChat(root, { platform, peerId }) })
+    }
+    if (url.pathname === '/api/chat/send' && req.method === 'POST') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const peerId = String(input.peerId ?? '')
+      const text = String(input.text ?? '').trim()
+      if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
+      if (!peerId) return json(res, { error: '缺少 peerId' }, 400)
+      if (!text) return json(res, { error: '内容不能为空' }, 400)
+      if (text.length > 500) return json(res, { error: '内容上限 500 字' }, 400)
+      const outcome = await runAction({ platform, kind: 'dm', target: peerId, text }, { env: { CATBUS_HOME: home } })
+      const message = await appendChat(root, {
+        platform,
+        peerId,
+        peerName: input.peerName ? String(input.peerName) : null,
+        direction: 'out',
+        text,
+        status: outcome.ok ? 'sent' : 'failed',
+      })
+      if (!outcome.ok) return json(res, { error: outcome.message, code: outcome.code, message }, 502)
+      return json(res, { ok: true, message }, 201)
+    }
+    if (url.pathname === '/api/chat/sync' && req.method === 'POST') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const peerId = String(input.peerId ?? '')
+      if (!findPlatform(platform) || !peerId) return json(res, { error: '需要 platform 和 peerId' }, 400)
+      let envelope: { ok?: boolean; data?: unknown; error?: { message?: string } }
+      try {
+        envelope = await runCatbus(platform as typeof CRAWL_PLATFORMS[number], ['msg', 'history', peerId, '--limit', '50'], { CATBUS_HOME: home })
+      } catch (error) {
+        return json(res, { error: error instanceof Error ? error.message : String(error) }, 502)
+      }
+      if (envelope.ok === false) return json(res, { error: envelope.error?.message ?? '这个平台暂不支持拉取聊天记录' }, 400)
+      const rows = Array.isArray(envelope.data) ? envelope.data as Array<Record<string, unknown>> : []
+      let imported = 0
+      for (const row of rows) {
+        const text = String((row.text ?? row.content ?? (row.message as Record<string, unknown> | undefined)?.text ?? '')).trim()
+        if (!text) continue
+        const self = Boolean(row.is_self ?? row.from_me ?? row.self)
+        const rawAt = row.created_at ?? row.create_time ?? row.time
+        const at = typeof rawAt === 'number' ? new Date(rawAt > 1e12 ? rawAt : rawAt * 1000).toISOString() : typeof rawAt === 'string' ? rawAt : undefined
+        if (await hasMessage(root, { platform, peerId, text, direction: self ? 'out' : 'in', at })) continue
+        await appendChat(root, {
+          platform,
+          peerId,
+          peerName: input.peerName ? String(input.peerName) : null,
+          direction: self ? 'out' : 'in',
+          text,
+          status: self ? 'sent' : 'received',
+        })
+        imported++
+      }
+      return json(res, { ok: true, imported, messages: await listChat(root, { platform, peerId }) })
+    }
+
     if (url.pathname === '/api/candidates/clear' && req.method === 'POST') {
       let input: Record<string, unknown> = {}
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch {}
@@ -675,6 +862,17 @@ export async function startUiServer(options: { port?: number; host?: string; out
           }
         }
         for (const client of job.events) client.end()
+        const counts = (job.result as { counts?: { items?: number; comments?: number } } | undefined)?.counts
+        await appendFile(join(userRoot(user.username), 'jobs.jsonl'), JSON.stringify({
+          id,
+          at: isoNow(),
+          platform: opts.platform,
+          type: opts.type,
+          keywords: opts.keywords ?? [],
+          items: counts?.items ?? 0,
+          comments: counts?.comments ?? 0,
+          status: job.status,
+        }) + '\n', 'utf8').catch(() => {})
       })()
       return
     }

@@ -26,6 +26,22 @@ export const crawl: View = {
 .crawl-msg.err{color:var(--danger)}
 .crawl-msg.ok{color:var(--ok)}
 
+/* ---------------------------------------------------------------- 采集：词块编辑器（关键词 / 评论筛选共用） */
+.crawl-chip-field{grid-column:1/-1}
+.crawl-chip-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap;min-height:24px}
+.crawl-chip-head>span:first-child{color:var(--muted);font-size:var(--fs-sm)}
+.crawl-chip-field.req .crawl-chip-head>span:first-child::after{content:" *";color:var(--danger)}
+.crawl-chip-acts{display:flex;gap:var(--s1);margin-left:auto}
+.crawl-chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1);padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--card);min-height:38px;cursor:text}
+.crawl-chips:focus-within{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-soft)}
+.crawl-chip{display:inline-flex;align-items:center;gap:2px;max-width:220px;padding:1px 3px 1px 7px;border-radius:3px;background:var(--acc-soft);color:var(--acc-ink);font-size:var(--fs-xs);line-height:1.7}
+.crawl-chip-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button.crawl-chip-x{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-size:var(--fs-sm);min-height:0;padding:0 3px;line-height:1;opacity:.6;cursor:pointer}
+button.crawl-chip-x:hover{opacity:1;background:transparent;color:var(--danger)}
+input.crawl-chip-in{flex:1 1 120px;width:auto;min-width:80px;min-height:0;padding:3px 2px;border:0;background:transparent;font-size:var(--fs-sm)}
+input.crawl-chip-in:focus{outline:none}
+mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;border-radius:2px}
+
 /* ---------------------------------------------------------------- 采集：已采数据 master-detail */
 .crawl-tools{display:flex;align-items:flex-end;gap:var(--s2);margin-left:auto}
 .crawl-tools .field{min-width:150px}
@@ -61,8 +77,8 @@ export const crawl: View = {
 .crawl-cm-kids .crawl-cm{border-style:dashed}
 .crawl-cm.picked{border-color:var(--acc);background:var(--acc-soft)}
 .crawl-cm-bar{display:flex;align-items:flex-end;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s2)}
-.crawl-cm-bar .crawl-cm-q{flex:1 1 280px;min-width:180px}
-.crawl-cm-bar .crawl-cm-hit{flex:none;white-space:nowrap;padding-bottom:7px}
+.crawl-cm-bar .crawl-cm-q{flex:1 1 320px;min-width:200px}
+.crawl-cm-bar .crawl-cm-hit{flex:none;white-space:nowrap;padding-bottom:2px}
 .crawl-cm-tools{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s3);padding:var(--s2) var(--s3);border:1px solid var(--line);border-radius:8px;background:var(--row-hover)}
 .crawl-cm-tools .crawl-cm-picked{margin-right:auto}
 .crawl-empty-a{display:flex;gap:var(--s2);justify-content:center;margin-top:var(--s3)}
@@ -84,7 +100,7 @@ export const crawl: View = {
   <form class="card crawl-form" id="crawlForm" novalidate>
     <div class="crawl-group">
       <div class="crawl-gt">基础</div>
-      <div class="grid3">
+      <div class="grid2">
         <label class="field req"><span>平台</span><select id="crawlPlatform" name="platform"></select></label>
         <label class="field req"><span>类型</span>
           <select id="crawlType" name="type">
@@ -93,7 +109,20 @@ export const crawl: View = {
             <option value="creator">指定博主</option>
           </select>
         </label>
-        <label class="field req" id="crawlFieldKeywords"><span>关键词</span><input id="crawlKeywords" name="keywords" autocomplete="off" placeholder="逗号分隔，如 露营,房车…"></label>
+        <div class="field req crawl-chip-field" id="crawlFieldKeywords">
+          <div class="crawl-chip-head">
+            <span>关键词</span>
+            <span class="crawl-chip-acts">
+              <button class="ghost sm" type="button" id="crawlKwImport">从词库导入</button>
+              <button class="ghost sm" type="button" id="crawlKwClear">清空</button>
+            </span>
+          </div>
+          <div class="crawl-chips" id="crawlKwChips" data-crawl-chips="kw">
+            <input id="crawlKeywordsInput" class="crawl-chip-in" autocomplete="off" placeholder="空格 / 逗号 / 回车切词，或点右上「从词库导入」">
+          </div>
+          <input type="hidden" id="crawlKeywords" name="keywords" value="">
+          <p class="tiny crawl-chip-n" id="crawlKwN">共 0 个词</p>
+        </div>
       </div>
     </div>
     <div class="crawl-group">
@@ -164,8 +193,9 @@ var crawlFallback=[
   {id:'tiktok',name:'TikTok'},
   {id:'x',name:'X'}
 ];
-var crawlState={ready:false,platforms:crawlFallback.slice(),recPlatform:'',items:[],sel:'',prefetch:null,comments:[],filter:'',picked:{},qt:0};
+var crawlState={ready:false,platforms:crawlFallback.slice(),recPlatform:'',items:[],sel:'',prefetch:null,comments:[],kw:[],filters:[],picked:{}};
 var crawlReqId=0;
+var crawlIme=false;
 
 function crawlMsg(el,text,kind){
   if(!el)return;
@@ -247,6 +277,153 @@ async function crawlLoadPlatforms(){
   crawlState.ready=!!(list&&list.length);
 }
 
+/* ---------------------------------------------------------------- 词块编辑器（关键词 / 评论筛选共用） */
+var crawlChipSep=/[\/,，、;；|\s]/;
+var crawlChipSplit=/[\/,，、;；|\s]+/;
+
+function crawlChipBox(kind){return $(kind==='kw'?'#crawlKwChips':'#crawlCmChips')}
+function crawlChipInputEl(kind){return $(kind==='kw'?'#crawlKeywordsInput':'#crawlCmFilter')}
+function crawlChipList(kind){return kind==='kw'?crawlState.kw:crawlState.filters}
+function crawlChipKind(el){
+  if(!el||!el.closest)return '';
+  var box=el.closest('[data-crawl-chips]');
+  return box?(box.getAttribute('data-crawl-chips')||''):'';
+}
+
+function crawlChipHtml(term,kind){
+  var t=esc(term);
+  return '<span class="crawl-chip" data-crawl-chip="1" title="'+t+'">'+
+    '<span class="crawl-chip-t">'+t+'</span>'+
+    '<button class="crawl-chip-x" type="button" data-crawl-chip-del="'+t+'" data-crawl-chip-kind="'+esc(kind)+'" aria-label="删除 '+t+'">×</button>'+
+  '</span>';
+}
+
+/* 提交兼容：表单里仍带 name=keywords 的隐藏 input，值始终是 join(',')。 */
+function crawlSyncKwHidden(){
+  var el=$('#crawlKeywords');
+  if(el)el.value=(crawlState.kw||[]).join(',');
+}
+
+function crawlChipRender(kind){
+  var isKw=kind==='kw';
+  var list=crawlChipList(kind)||[];
+  var box=crawlChipBox(kind),input=crawlChipInputEl(kind);
+  if(box){
+    $$('[data-crawl-chip]',box).forEach(function(el){if(el.parentNode)el.parentNode.removeChild(el)});
+    var html=list.map(function(term){return crawlChipHtml(term,kind)}).join('');
+    if(html){
+      if(input)input.insertAdjacentHTML('beforebegin',html);
+      else box.insertAdjacentHTML('afterbegin',html);
+    }
+  }
+  var count=$(isKw?'#crawlKwN':'#crawlCmFilterN');
+  if(count)count.textContent='共 '+list.length+' 个词';
+  var clearBtn=$(isKw?'#crawlKwClear':'#crawlCmClear');
+  if(clearBtn)clearBtn.disabled=!list.length;
+  if(isKw)crawlSyncKwHidden();
+}
+
+/* 追加词块：忽略大小写去重，单个词最多 40 字（和词库一致）。返回 {added,skipped}。 */
+function crawlChipAddList(kind,terms){
+  var list=crawlChipList(kind);
+  var arr=Object.prototype.toString.call(terms)==='[object Array]'?terms:[];
+  var seen={};
+  list.forEach(function(t){seen[String(t).toLowerCase()]=1});
+  var added=0,skipped=0;
+  arr.forEach(function(raw){
+    var v=String(raw==null?'':raw).trim().slice(0,40);
+    if(!v){skipped++;return}
+    var key=v.toLowerCase();
+    if(seen[key]){skipped++;return}
+    seen[key]=1;
+    list.push(v);
+    added++;
+  });
+  if(added){
+    crawlChipRender(kind);
+    if(kind!=='kw')crawlRenderComments();
+  }
+  return {added:added,skipped:skipped};
+}
+
+function crawlChipAddTerms(kind,raw){
+  var text=String(raw==null?'':raw).trim();
+  if(!text)return {added:0,skipped:0};
+  var parts=text.split(crawlChipSplit).filter(function(t){return !!t});
+  return crawlChipAddList(kind,parts);
+}
+
+/* 输入框里出现分隔符就切词；最后一段可能还没打完，留在输入框里。 */
+function crawlChipFlush(kind,input){
+  if(!input)return;
+  var value=String(input.value||'');
+  if(!crawlChipSep.test(value))return;
+  var parts=value.split(crawlChipSplit);
+  var tail=parts.pop()||'';
+  if(parts.length)crawlChipAddList(kind,parts);
+  input.value=tail;
+}
+
+/* 回车：把输入框里剩下的整段也切成词块（拦掉表单默认提交）。 */
+function crawlChipCommit(kind,input){
+  if(!input)return;
+  var value=String(input.value||'').trim();
+  input.value='';
+  if(value)crawlChipAddTerms(kind,value);
+}
+
+function crawlChipPop(kind){
+  var list=crawlChipList(kind);
+  if(!list||!list.length)return;
+  list.pop();
+  crawlChipRender(kind);
+  if(kind!=='kw')crawlRenderComments();
+}
+
+function crawlChipRemove(kind,term){
+  var list=crawlChipList(kind);
+  if(!list)return;
+  var at=-1;
+  for(var i=0;i<list.length;i++)if(list[i]===term){at=i;break}
+  if(at<0)return;
+  list.splice(at,1);
+  crawlChipRender(kind);
+  if(kind!=='kw')crawlRenderComments();
+}
+
+function crawlChipClear(kind){
+  var list=crawlChipList(kind);
+  var input=crawlChipInputEl(kind);
+  if(input)input.value='';
+  if(list&&list.length)list.length=0;
+  crawlChipRender(kind);
+  if(kind!=='kw')crawlRenderComments();
+}
+
+/* 从词库导入：GET /api/lexicon，去重追加；词库为空只提示，不动现有词块。 */
+async function crawlChipImport(kind,btn){
+  if(btn)btn.disabled=true;
+  try{
+    var r=await api('/api/lexicon');
+    var source=r?(kind==='kw'?r.keywords:r.filters):null;
+    var list=Object.prototype.toString.call(source)==='[object Array]'?source:[];
+    if(!list.length){
+      toast('词库里还没有'+(kind==='kw'?'关键词':'筛选词'),'');
+      return;
+    }
+    var res=crawlChipAddList(kind,list);
+    if(!res.added){
+      toast('词库里的 '+list.length+' 个词都已经在了','');
+      return;
+    }
+    toast('从词库导入 '+res.added+' 个词'+(res.skipped?'，跳过 '+res.skipped+' 个重复':''),'ok');
+  }catch(e){
+    toast('词库读取失败：'+e.message,'err');
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+
 /* ---------------------------------------------------------------- 已采数据 */
 function crawlEmptyActions(extra){
   return '<div class="crawl-empty-a">'+
@@ -302,11 +479,18 @@ function crawlRenderDetail(it){
     '<div class="crawl-dt-c">'+
       '<div class="crawl-dt-ch"><h3>评论</h3><span class="badge" id="crawlCmCount">读取中…</span></div>'+
       '<div class="crawl-cm-bar" id="crawlCmBar" hidden>'+
-        '<label class="field crawl-cm-q"><span>关键词筛选</span>'+
-          '<input id="crawlCmFilter" type="search" autocomplete="off" placeholder="多个词用空格或 / 分隔，命中任一即显示…">'+
-        '</label>'+
+        '<div class="field crawl-cm-q crawl-chip-field">'+
+          '<div class="crawl-chip-head"><span>评论筛选</span>'+
+            '<span class="crawl-chip-acts">'+
+              '<button class="ghost sm" id="crawlCmImport" type="button">从词库导入</button>'+
+              '<button class="ghost sm" id="crawlCmClear" type="button">清空</button>'+
+            '</span></div>'+
+          '<div class="crawl-chips" id="crawlCmChips" data-crawl-chips="filter">'+
+            '<input id="crawlCmFilter" class="crawl-chip-in" type="text" autocomplete="off" placeholder="空格或 / 切词，命中任一即显示">'+
+          '</div>'+
+          '<p class="tiny crawl-chip-n" id="crawlCmFilterN">共 0 个词</p>'+
+        '</div>'+
         '<span class="tiny crawl-cm-hit" id="crawlCmHit">命中 0 条 / 共 0 条</span>'+
-        '<button class="ghost sm" id="crawlCmFilterClear" type="button" hidden>清空筛选</button>'+
       '</div>'+
       '<div class="crawl-cm-tools" id="crawlCmTools" hidden>'+
         '<label class="check"><input type="checkbox" id="crawlCmAll"> 全选可见</label>'+
@@ -317,25 +501,55 @@ function crawlRenderDetail(it){
       '</div>'+
       '<div id="crawlCommentList"><p class="loading">读取评论…</p></div>'+
     '</div>';
+  /* 详情是整块重建的，筛选词块按当前状态补回来，免得词块区和筛选词脱节 */
+  crawlChipRender('filter');
 }
 
-function crawlCommentHtml(c,child,kids){
+/* 高亮：先把正文当纯文本转义，再只为命中片段套 <mark>；关键词当字面量拼进正则（大小写不敏感），
+   所以正文里的 < > & " 都不会被当成标签，词里的正则元字符也不会生效。 */
+function crawlHl(text,tokens){
+  var raw=String(text==null?'':text);
+  if(!tokens||!tokens.length)return esc(raw);
+  var seen={},list=[];
+  tokens.forEach(function(t){
+    var v=String(t==null?'':t).trim().slice(0,40);
+    if(!v)return;
+    var key=v.toLowerCase();
+    if(seen[key])return;
+    seen[key]=1;
+    list.push(v);
+  });
+  if(!list.length)return esc(raw);
+  list.sort(function(a,b){return b.length-a.length});
+  var re=new RegExp('('+list.map(function(t){return t.replace(/[.*+?^$()|[\]{}\\]/g,'\\$&')}).join('|')+')','gi');
+  var out='',pos=0,hits=0,m;
+  while((m=re.exec(raw))!==null&&hits<500){
+    if(m[0]===''){re.lastIndex++;continue}
+    out+=esc(raw.slice(pos,m.index))+'<mark class="crawl-hl">'+esc(m[0])+'</mark>';
+    pos=m.index+m[0].length;
+    hits++;
+  }
+  out+=esc(raw.slice(pos));
+  return out;
+}
+
+function crawlCommentHtml(c,child,kids,tokens){
   var a=c.author||{};
   var who=a.name||a.id||'匿名';
   var uid=a.id||'';
   var list=kids||c.children||[];
   var sub=list.length
-    ? '<div class="crawl-cm-kids">'+list.map(function(k){return crawlCommentHtml(k,true)}).join('')+'</div>'
+    ? '<div class="crawl-cm-kids">'+list.map(function(k){return crawlCommentHtml(k,true,null,tokens)}).join('')+'</div>'
     : '';
   return '<div class="crawl-cm'+(child?' child':'')+'" data-comment="'+esc(c.id)+'" data-user="'+esc(uid)+'" data-who="'+esc(who)+'">'+
     '<div class="crawl-cm-h">'+
       '<label class="check crawl-cm-pick"><input type="checkbox" data-crawl-pick="1" aria-label="勾选这条评论"></label>'+
-      '<b>'+esc(who)+'</b>'+
+      '<b>'+crawlHl(who,tokens)+'</b>'+
       (c.created_at?'<span class="tiny">'+esc(fmtTime(c.created_at))+'</span>':'')+
       '<span class="tiny">赞 '+num(c.stats&&c.stats.likes)+'</span>'+
       (c.province?'<span class="badge">'+esc(c.province)+'</span>':'')+
     '</div>'+
-    '<p class="crawl-cm-t">'+esc(c.text||'')+'</p>'+
+    '<p class="crawl-cm-t">'+crawlHl(c.text||'',tokens)+'</p>'+
     '<div class="crawl-cm-a">'+
       '<button class="ghost sm" type="button" data-crawl-act="reply">回复</button>'+
       '<button class="ghost sm" type="button" data-crawl-act="cand-reply">加回复候选</button>'+
@@ -385,9 +599,14 @@ function crawlCommentsAll(){
   return n;
 }
 
-/* 空格或 / 分隔，全小写；空字符串＝不过滤。 */
+/* 词块即筛选词，全部小写；空数组＝不过滤。 */
 function crawlFilterTokens(){
-  return String(crawlState.filter||'').toLowerCase().split(/[\s\/]+/).filter(function(token){return !!token});
+  var out=[];
+  (crawlState.filters||[]).forEach(function(token){
+    var v=String(token==null?'':token).trim().toLowerCase();
+    if(v)out.push(v);
+  });
+  return out;
 }
 
 /* 匹配范围：评论正文 + 作者名，大小写不敏感。 */
@@ -406,12 +625,12 @@ function crawlShowCmUi(on){
 }
 
 function crawlResetComments(){
-  if(crawlState.qt){clearTimeout(crawlState.qt);crawlState.qt=0}
   crawlState.comments=[];
-  crawlState.filter='';
+  /* 筛选词跨作品保留：切作品时只清选中态和输入框，不清词块 */
   crawlState.picked={};
   var input=$('#crawlCmFilter');
   if(input)input.value='';
+  crawlChipRender('filter');
 }
 
 /* 一级评论：自己命中或任一二级命中就留下；自己命中时二级全留（看上下文），否则只留命中的二级。 */
@@ -420,6 +639,7 @@ function crawlRenderComments(){
   if(!box)return;
   var roots=crawlState.comments||[];
   var tokens=crawlFilterTokens();
+  var words=crawlState.filters||[];
   var total=crawlCommentsAll();
   var html=[],shown=0;
   roots.forEach(function(c){
@@ -427,46 +647,20 @@ function crawlRenderComments(){
     var self=crawlCommentHit(c,tokens);
     if(tokens.length&&!self)kids=kids.filter(function(k){return crawlCommentHit(k,tokens)});
     if(tokens.length&&!self&&!kids.length)return;
-    html.push(crawlCommentHtml(c,false,kids));
+    html.push(crawlCommentHtml(c,false,kids,words));
     shown+=1+kids.length;
   });
   var hit=$('#crawlCmHit');
   if(hit)hit.textContent='命中 '+shown+' 条 / 共 '+total+' 条';
-  var clearBtn=$('#crawlCmFilterClear');
-  if(clearBtn)clearBtn.hidden=!crawlState.filter;
   crawlState.picked={};
   if(!html.length){
-    box.innerHTML='<div class="empty"><b>没有评论命中「'+esc(crawlState.filter)+'」</b>'+
-      '<span class="sub">只在评论正文和作者名里找；多个词用空格或 / 分隔，命中任一即显示。</span>'+
+    box.innerHTML='<div class="empty"><b>没有评论命中「'+esc(words.join(' / '))+'」</b>'+
+      '<span class="sub">只在评论正文和作者名里找；词块之间是「或」，命中任一即显示。</span>'+
       '<div class="crawl-empty-a"><button class="ghost sm" type="button" data-crawl-go="filter-clear">清空筛选</button></div></div>';
   }else{
     box.innerHTML=html.join('');
   }
   crawlSyncPicked();
-}
-
-function crawlApplyFilter(value){
-  var next=String(value==null?'':value).trim();
-  if(next===crawlState.filter)return;
-  crawlState.filter=next;
-  crawlRenderComments();
-}
-
-function crawlFilterInput(el){
-  if(crawlState.qt){clearTimeout(crawlState.qt);crawlState.qt=0}
-  crawlState.qt=setTimeout(function(){
-    crawlState.qt=0;
-    crawlApplyFilter(el?el.value:'');
-  },300);
-}
-
-function crawlClearFilter(){
-  if(crawlState.qt){clearTimeout(crawlState.qt);crawlState.qt=0}
-  var input=$('#crawlCmFilter');
-  if(input)input.value='';
-  if(!crawlState.filter)return;
-  crawlState.filter='';
-  crawlRenderComments();
 }
 
 function crawlSyncPicked(){
@@ -580,22 +774,32 @@ function crawlOnChange(ev){
 
 function crawlOnInput(ev){
   var t=ev.target;
-  if(!t||t.id!=='crawlCmFilter')return;
-  crawlFilterInput(t);
+  if(!t||!t.closest||t.tagName!=='INPUT')return;
+  var kind=crawlChipKind(t);
+  if(!kind)return;
+  if(ev.isComposing||crawlIme)return;
+  crawlChipFlush(kind,t);
 }
 
 function crawlOnKey(ev){
   var t=ev.target;
-  if(!t||t.id!=='crawlCmFilter')return;
+  if(!t||!t.closest||t.tagName!=='INPUT')return;
+  var kind=crawlChipKind(t);
+  if(!kind)return;
+  if(ev.isComposing||crawlIme)return;
   if(ev.key==='Enter'){
     ev.preventDefault();
-    if(crawlState.qt){clearTimeout(crawlState.qt);crawlState.qt=0}
-    crawlApplyFilter(t.value);
+    crawlChipCommit(kind,t);
     return;
   }
-  if(ev.key==='Escape'){
+  if(ev.key==='Backspace'&&!t.value){
     ev.preventDefault();
-    crawlClearFilter();
+    crawlChipPop(kind);
+    return;
+  }
+  if(ev.key==='Escape'&&kind!=='kw'){
+    ev.preventDefault();
+    crawlChipClear(kind);
   }
 }
 
@@ -728,13 +932,31 @@ function crawlOnClick(ev){
     if(what==='account'){omc.go('account');return}
     if(what==='form'){crawlScrollToForm();return}
     if(what==='reload'){crawlLoadRecords();return}
-    if(what==='filter-clear'){crawlClearFilter();return}
+    if(what==='filter-clear'){crawlChipClear('filter');return}
     if(what==='comments'){var cur=crawlCurrentItem();if(cur)crawlLoadComments(cur);return}
   }
   var bulkBtn=t.closest('[data-crawl-bulk]');
   if(bulkBtn){crawlBulkCandidates(bulkBtn,bulkBtn.getAttribute('data-crawl-bulk'));return}
   if(t.closest('#crawlCmPickClear')){crawlState.picked={};crawlSyncPicked();return}
-  if(t.closest('#crawlCmFilterClear')){crawlClearFilter();return}
+  var chipDel=t.closest('[data-crawl-chip-del]');
+  if(chipDel){
+    crawlChipRemove(chipDel.getAttribute('data-crawl-chip-kind')||'',chipDel.getAttribute('data-crawl-chip-del')||'');
+    return;
+  }
+  var kwImport=t.closest('#crawlKwImport');
+  if(kwImport){crawlChipImport('kw',kwImport);return}
+  var kwClear=t.closest('#crawlKwClear');
+  if(kwClear){crawlChipClear('kw');return}
+  var cmImport=t.closest('#crawlCmImport');
+  if(cmImport){crawlChipImport('filter',cmImport);return}
+  var cmClear=t.closest('#crawlCmClear');
+  if(cmClear){crawlChipClear('filter');return}
+  var chipsBox=t.closest('[data-crawl-chips]');
+  if(chipsBox){
+    var chipsInput=chipsBox.querySelector('input');
+    if(chipsInput&&t!==chipsInput)chipsInput.focus();
+    return;
+  }
   var itemBtn=t.closest('[data-crawl-item]');
   if(itemBtn){crawlSelect(itemBtn.getAttribute('data-crawl-item'));return}
   var actBtn=t.closest('[data-crawl-act]');
@@ -757,6 +979,10 @@ async function crawlSubmit(ev){
   var platformEl=$('#crawlPlatform'),typeEl=$('#crawlType');
   if(!platformEl||!typeEl)return;
   var platform=platformEl.value,type=typeEl.value;
+  /* 输入框里还没回车的那段也算一个词：提交前先切成词块，再同步隐藏 input */
+  var kwInput=$('#crawlKeywordsInput');
+  if(kwInput&&String(kwInput.value||'').trim())crawlChipCommit('kw',kwInput);
+  crawlSyncKwHidden();
   var kw=$('#crawlKeywords'),ids=$('#crawlIds'),cre=$('#crawlCreators');
   var values={
     keywords:kw?kw.value.trim():'',
@@ -771,7 +997,7 @@ async function crawlSubmit(ev){
   var key=type==='search'?'keywords':(type==='detail'?'ids':'creators');
   if(!values[key]){
     crawlMsg(msg,'请填「'+label+'」，这个类型必填','err');
-    var focus=$(type==='search'?'#crawlKeywords':(type==='detail'?'#crawlIds':'#crawlCreators'));
+    var focus=$(type==='search'?'#crawlKeywordsInput':(type==='detail'?'#crawlIds':'#crawlCreators'));
     if(focus&&focus.focus)focus.focus();
     return;
   }
@@ -850,8 +1076,30 @@ function crawlInit(){
   document.addEventListener('change',crawlOnChange);
   document.addEventListener('input',crawlOnInput);
   document.addEventListener('keydown',crawlOnKey);
+  /* 粘贴一长串词时整体切词，不留半截在输入框 */
+  document.addEventListener('paste',function(ev){
+    var t=ev.target;
+    if(!t||!t.closest||t.tagName!=='INPUT')return;
+    var kind=crawlChipKind(t);
+    if(!kind)return;
+    var dt=ev.clipboardData||window.clipboardData;
+    var text=dt&&dt.getData?String(dt.getData('text')||''):'';
+    if(!text||!crawlChipSep.test(text))return;
+    ev.preventDefault();
+    crawlChipAddTerms(kind,text);
+  });
+  /* 中文输入法拼写过程中的空格/回车不切词 */
+  document.addEventListener('compositionstart',function(){crawlIme=true});
+  document.addEventListener('compositionend',function(ev){
+    crawlIme=false;
+    var t=ev.target;
+    if(!t||!t.closest||t.tagName!=='INPUT')return;
+    var kind=crawlChipKind(t);
+    if(kind)crawlChipFlush(kind,t);
+  });
   crawlFillSelects('','');
   crawlSyncType();
+  crawlChipRender('kw');
   omc.onShow('crawl',crawlOnShow);
 }
 

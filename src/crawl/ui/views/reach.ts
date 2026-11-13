@@ -1,7 +1,8 @@
 import type { View } from '../types.js'
 
 /**
- * 触达：候选池 + 群发 + 单条互动 + 任务与日志。
+ * 触达：两个 tab ——「候选与群发」（候选池 / 群发 / 任务 / 单条互动）与
+ * 「私信会话」（会话列表 + 聊天窗口）。
  *
  * 所有标识符（函数 / 变量 / HTML id / class）都带 reach 前缀：各视图的 js
  * 拼在同一个 <script> 里共享作用域，不加前缀会互相覆盖。
@@ -10,7 +11,7 @@ export const reach: View = {
   id: 'reach',
   nav: '触达',
   title: '触达',
-  sub: '候选池统一回复或私信，按间隔逐条发送。',
+  sub: '候选池统一回复或私信，按间隔逐条发送；私信会话按人聊。',
 
   css: String.raw`
 .reach-bar{margin-bottom:var(--s2)}
@@ -28,9 +29,66 @@ export const reach: View = {
 .reach-act{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3);margin-top:var(--s3)}
 .reach-act .full{grid-column:1/-1}
 @media(max-width:640px){.reach-act{grid-template-columns:1fr}}
+
+/* 分栏 tab */
+.reach-tabs{display:flex;align-items:center;gap:var(--s1);border-bottom:1px solid var(--line);margin-bottom:var(--s4)}
+.reach-tab{appearance:none;background:none;border:0;border-bottom:2px solid transparent;border-radius:0;min-height:34px;padding:6px 12px;color:var(--muted);font-weight:600}
+.reach-tab:hover{background:var(--row-hover);color:var(--fg)}
+.reach-tab.is-on,.reach-tab.is-on:hover{color:var(--acc-ink);background:transparent;border-bottom-color:var(--acc)}
+
+/* 候选行操作 */
+.reach-cand-ops{display:flex;align-items:center;gap:var(--s2);white-space:nowrap}
+
+/* 私信会话 */
+.reach-chat{display:grid;grid-template-columns:260px minmax(0,1fr);gap:var(--s3);height:min(70vh,660px)}
+.reach-threads{display:flex;flex-direction:column;gap:var(--s1);min-width:0;min-height:0;padding:var(--s2)}
+.reach-threads-head{padding:var(--s1) var(--s2) 0}
+.reach-thread-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:2px}
+.reach-th{display:block;flex:none;width:100%;text-align:left;background:none;border:1px solid transparent;border-left:2px solid transparent;border-radius:4px;padding:7px 9px;min-height:0;justify-content:flex-start;font-weight:400;color:var(--fg)}
+.reach-th:hover{background:var(--row-hover)}
+.reach-th.is-on,.reach-th.is-on:hover{background:var(--acc-soft);border-left-color:var(--acc)}
+.reach-th-top{display:flex;align-items:center;gap:6px;min-width:0}
+.reach-th-name{font-size:var(--fs-sm);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.reach-th-top .badge{flex:none}
+.reach-th-last{display:block;font-size:var(--fs-xs);color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reach-th.is-on .reach-th-last{color:var(--acc-ink)}
+.reach-th-meta{display:flex;justify-content:space-between;gap:var(--s2);font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
+.reach-th-empty{flex:1;display:flex;flex-direction:column;justify-content:center}
+
+.reach-chat-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding:0}
+.reach-chat-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.reach-chat-peer{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 160px}
+.reach-chat-peer>b{font-size:var(--fs);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reach-msgs{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:var(--s3);background:var(--bg)}
+.reach-msgs-empty{display:flex;flex-direction:column;justify-content:center;height:100%}
+.reach-msg{display:flex;margin-bottom:var(--s2)}
+.reach-msg.is-out{justify-content:flex-end}
+.reach-msg.is-in{justify-content:flex-start}
+.reach-bub{max-width:78%;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:var(--s2) var(--s3);word-break:break-word}
+.reach-msg.is-out .reach-bub{background:var(--acc-soft);border-color:var(--acc-soft)}
+.reach-bub.is-fail,.reach-msg.is-out .reach-bub.is-fail{background:var(--card);border-color:var(--danger)}
+.reach-bub-text{white-space:pre-wrap;font-size:var(--fs-sm);line-height:1.6}
+.reach-bub-meta{display:flex;justify-content:flex-end;gap:var(--s2);font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
+.reach-bub-fail{color:var(--danger);font-weight:600}
+.reach-chat-note{margin:0;padding:var(--s2) var(--s3) 0;font-size:var(--fs-xs);color:var(--muted);word-break:break-word}
+.reach-chat-note.is-err{color:var(--danger)}
+.reach-composer{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) var(--s3) var(--s3);border-top:1px solid var(--line)}
+.reach-composer textarea{resize:vertical;min-height:52px;max-height:160px}
+.reach-comp-bar{display:flex;align-items:center;gap:var(--s2)}
+@media(max-width:960px){
+  .reach-chat{grid-template-columns:minmax(0,1fr);height:auto;gap:var(--s2)}
+  .reach-thread-list{height:40vh;flex:none}
+  .reach-msgs{height:52vh;flex:none}
+}
 `,
 
   html: String.raw`
+<div class="reach-tabs" id="reachTabs" role="tablist" aria-label="触达分栏">
+  <button class="reach-tab is-on" id="reachTabCand" type="button" role="tab" aria-selected="true" aria-controls="reachPanelCand" data-reach-tab="cand">候选与群发</button>
+  <button class="reach-tab" id="reachTabChat" type="button" role="tab" aria-selected="false" aria-controls="reachPanelChat" data-reach-tab="chat">私信会话</button>
+</div>
+
+<div id="reachPanelCand" role="tabpanel" aria-labelledby="reachTabCand">
 <section class="sec">
   <div class="sec-head">
     <h2>候选池与群发</h2>
@@ -140,7 +198,54 @@ export const reach: View = {
       </div>
     </form>
   </details>
-</section>`,
+</section>
+</div>
+
+<div id="reachPanelChat" role="tabpanel" aria-labelledby="reachTabChat" hidden>
+<section class="sec">
+  <div class="sec-head">
+    <h2>私信会话</h2>
+    <span class="sub">左列选会话，右列看记录、直接发；没有历史也能发第一条。「同步历史」目前小红书可用，抖音的消息历史接口还在规划中。</span>
+  </div>
+  <div class="reach-chat">
+    <div class="card reach-threads">
+      <div class="row reach-threads-head">
+        <b class="tiny">会话</b>
+        <span class="spacer"></span>
+        <span class="tiny num" id="reachThreadCount"></span>
+      </div>
+      <div class="reach-thread-list" id="reachThreadList"></div>
+      <div class="empty reach-th-empty" id="reachThreadEmpty" hidden></div>
+      <p class="hint" id="reachThreadsMsg" hidden></p>
+    </div>
+
+    <div class="card reach-chat-main">
+      <div class="reach-chat-head">
+        <div class="reach-chat-peer">
+          <b id="reachChatName">未选择会话</b>
+          <span class="tiny" id="reachChatMeta">从左边选一个会话，或回候选池点「打开会话」。</span>
+        </div>
+        <button class="ghost sm" id="reachChatReload" type="button">刷新</button>
+        <button class="ghost sm" id="reachChatSync" type="button" disabled>同步历史</button>
+      </div>
+      <p class="reach-chat-note" id="reachChatNote" hidden></p>
+      <div class="reach-msgs" id="reachChatMsgs">
+        <div id="reachChatList"></div>
+        <div class="empty reach-msgs-empty" id="reachChatEmpty" hidden></div>
+      </div>
+      <form class="reach-composer" id="reachChatForm">
+        <textarea id="reachChatText" rows="2" maxlength="500" placeholder="先在左边选一个会话" disabled></textarea>
+        <div class="reach-comp-bar">
+          <span class="tiny num" id="reachChatCount">0 / 500</span>
+          <span class="tiny">Enter 发送，Shift+Enter 换行</span>
+          <span class="spacer"></span>
+          <button class="primary" id="reachChatSend" type="submit" disabled>发送</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+</div>`,
 
   js: String.raw`
 /* ---------------------------------------------------------------- 状态 */
@@ -149,6 +254,10 @@ var reachSettings={dailyCap:null,minSeconds:30,maxSeconds:90};
 var reachCamp=null;
 var reachJobs=[],reachOpenJob=null,reachJobsTimer=null,reachJobsSeq=0;
 var reachActMap={comment:[],dm:[]};
+var reachTabCur='cand';
+var reachThreads=[],reachThreadsSeq=0,reachThreadsLoaded=false;
+var reachPeerNames={};
+var reachChat={platform:'',peerId:'',peerName:'',messages:[],ghost:null,seq:0,sending:false,syncing:false};
 
 function reachShow(el,text){if(!el)return;if(text){el.textContent=text;el.hidden=false}else{el.textContent='';el.hidden=true}}
 function reachShort(v,n){var s=String(v==null?'':v);return s.length>n?s.slice(0,n-1)+'…':s}
@@ -156,6 +265,35 @@ function reachParseJson(raw){
   if(raw==null)return null;
   if(typeof raw==='object')return raw;
   try{return JSON.parse(String(raw))}catch(e){return null}
+}
+
+/* ---------------------------------------------------------------- 分栏 tab */
+function reachSetTab(name){
+  var next=name==='chat'?'chat':'cand';
+  reachTabCur=next;
+  var pairs=[['cand',$('#reachTabCand'),$('#reachPanelCand')],['chat',$('#reachTabChat'),$('#reachPanelChat')]];
+  var i,on,btn,panel;
+  for(i=0;i<pairs.length;i++){
+    on=pairs[i][0]===next;btn=pairs[i][1];panel=pairs[i][2];
+    if(btn){
+      btn.setAttribute('aria-selected',on?'true':'false');
+      btn.className='reach-tab'+(on?' is-on':'');
+    }
+    if(panel)panel.hidden=!on;
+  }
+  if(next==='chat'){
+    if(!reachThreadsLoaded)reachLoadThreads();
+    reachChatHead();
+    reachRenderMessages(reachChat.messages);
+  }
+  var bar=$('#reachTabs');
+  if(bar&&bar.getBoundingClientRect&&bar.getBoundingClientRect().top<0&&bar.scrollIntoView)bar.scrollIntoView({block:'start'});
+}
+
+function reachCandById(id){
+  var i;
+  for(i=0;i<reachCands.length;i++){if(reachCands[i].id===id)return reachCands[i]}
+  return null;
 }
 
 /* ---------------------------------------------------------------- 候选池 */
@@ -195,13 +333,18 @@ function reachRenderCandidates(){
     c=reachCands[i];
     var target=reachCandTarget(c);
     var note=c.note||('作品 '+c.itemId);
+    var chatBtn=c.userId
+      ?'<button class="ghost sm" type="button" data-chat="'+esc(c.id)+'">打开会话</button>'
+      :'<button class="ghost sm" type="button" disabled title="这条候选没有用户 ID（评论作者没采到），打不开会话">打开会话</button>';
     html+='<tr>'+
       '<td class="sel"><input type="checkbox" data-sel="'+esc(c.id)+'"'+(reachCandSel[c.id]?' checked':'')+' aria-label="选择候选"></td>'+
       '<td><span class="badge">'+(c.type==='reply'?'回复':'私信')+'</span></td>'+
       '<td class="mono tiny">'+esc(c.platform)+'</td>'+
       '<td class="tx" title="'+esc(target)+'">'+esc(target)+'</td>'+
       '<td class="tx" title="'+esc(note)+'">'+esc(note)+'</td>'+
-      '<td><button class="danger sm" type="button" data-del="'+esc(c.id)+'">移除</button></td>'+
+      '<td><span class="reach-cand-ops">'+chatBtn+
+        '<button class="danger sm" type="button" data-del="'+esc(c.id)+'">移除</button>'+
+      '</span></td>'+
     '</tr>';
   }
   if(body)body.innerHTML=html;
@@ -216,6 +359,15 @@ function reachBindCandidates(){
     box.onchange=function(){
       if(box.checked)reachCandSel[box.dataset.sel]=1;else delete reachCandSel[box.dataset.sel];
       reachUpdateMeta();
+    };
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('button[data-chat]'),function(btn){
+    btn.onclick=function(){
+      var c=reachCandById(btn.dataset.chat);
+      if(!c)return;
+      if(!c.userId){reachShow($('#reachCandMsg'),'这条候选没有用户 ID（评论作者没采到），打不开会话。');return}
+      reachShow($('#reachCandMsg'),'');
+      reachOpenChat(c.platform,c.userId,c.userName);
     };
   });
   Array.prototype.forEach.call(body.querySelectorAll('button[data-del]'),function(btn){
@@ -326,6 +478,7 @@ function reachCampDone(text){
   if($('#reachCampStart'))$('#reachCampStart').disabled=false;
   reachSetCampMsg(text);
   reachLoadCandidates();
+  reachLoadThreads();
 }
 
 async function reachStartCampaign(ev){
@@ -692,6 +845,284 @@ function reachFillReply(input){
   toast('已填入目标，补充文案后确认发送');
 }
 
+/* ---------------------------------------------------------------- 私信会话 */
+function reachChatNote(text,isErr){
+  var el=$('#reachChatNote');
+  if(!el)return;
+  if(text){el.textContent=text;el.hidden=false;el.className='reach-chat-note'+(isErr?' is-err':'')}
+  else{el.textContent='';el.hidden=true;el.className='reach-chat-note'}
+}
+
+function reachChatCount(){
+  var ta=$('#reachChatText'),el=$('#reachChatCount');
+  if(!el)return;
+  var n=ta?String(ta.value||'').length:0;
+  el.textContent=n+' / 500';
+  el.style.color=n>500?'var(--danger)':'';
+}
+
+/** 昵称：优先服务端的，其次这次从候选带过来的，最后退回 peerId。 */
+function reachPeerLabel(platform,peerId,name){
+  if(name)return name;
+  return reachPeerNames[platform+':'+peerId]||peerId;
+}
+
+/** 顶部：对方昵称 + 平台 + 按钮可用性（没有会话时输入框关掉）。 */
+function reachChatHead(){
+  var cur=reachChat,has=!!(cur.platform&&cur.peerId);
+  var name=$('#reachChatName'),meta=$('#reachChatMeta');
+  var ta=$('#reachChatText'),send=$('#reachChatSend'),sync=$('#reachChatSync');
+  if(name)name.textContent=has?reachPeerLabel(cur.platform,cur.peerId,cur.peerName):'未选择会话';
+  if(meta)meta.textContent=has?(cur.platform+' · '+cur.peerId):'从左边选一个会话，或回候选池点「打开会话」。';
+  if(ta){
+    ta.disabled=!has||cur.sending;
+    ta.placeholder=has?'输入私信内容…':'先在左边选一个会话';
+  }
+  if(send)send.disabled=!has||cur.sending;
+  if(sync)sync.disabled=!has||cur.syncing;
+}
+
+/** 会话列表：服务端的会话 + 刚从候选打开、还没有任何记录的那一个。 */
+function reachThreadItems(){
+  var out=[],i,t,g=reachChat.ghost;
+  if(g)out.push(g);
+  for(i=0;i<reachThreads.length;i++){
+    t=reachThreads[i];
+    if(g&&t.platform===g.platform&&t.peerId===g.peerId)continue;
+    out.push(t);
+  }
+  return out;
+}
+
+function reachThreadLast(t){
+  if(!t||!t.last||t.last.text==null||t.last.text==='')return '还没有消息';
+  return (t.last.direction==='out'?'我：':'')+String(t.last.text);
+}
+
+function reachRenderThreads(){
+  var list=$('#reachThreadList'),empty=$('#reachThreadEmpty'),cnt=$('#reachThreadCount');
+  var items=reachThreadItems(),html='',i,t,on,name,local;
+  if(cnt)cnt.textContent=items.length?items.length+' 个':'';
+  if(!items.length){
+    if(list){list.innerHTML='';list.hidden=true}
+    if(empty){
+      empty.innerHTML='<b>还没有会话</b><span>回「候选与群发」，在候选行点「打开会话」发第一条；发过的私信会按人整理到这里。</span>';
+      empty.hidden=false;
+    }
+    return;
+  }
+  if(list)list.hidden=false;
+  if(empty)empty.hidden=true;
+  for(i=0;i<items.length;i++){
+    t=items[i];
+    on=reachChat.platform===t.platform&&reachChat.peerId===t.peerId;
+    name=reachPeerLabel(t.platform,t.peerId,t.peerName);
+    local=t.peerName||reachPeerNames[t.platform+':'+t.peerId]||'';
+    html+='<button type="button" class="reach-th'+(on?' is-on':'')+'"'+
+      ' data-th-platform="'+esc(t.platform)+'" data-th-peer="'+esc(t.peerId)+'" data-th-name="'+esc(local)+'"'+
+      ' aria-pressed="'+(on?'true':'false')+'" title="'+esc(name+' · '+t.platform+' · '+t.peerId)+'">'+
+      '<span class="reach-th-top"><span class="reach-th-name">'+esc(name)+'</span><span class="badge">'+esc(t.platform)+'</span></span>'+
+      '<span class="reach-th-last">'+esc(reachThreadLast(t))+'</span>'+
+      '<span class="reach-th-meta"><span>'+esc(t.last?fmtTime(t.last.at):'')+'</span><span class="num">'+Number(t.count||0)+' 条</span></span>'+
+    '</button>';
+  }
+  if(list)list.innerHTML=html;
+}
+
+function reachMarkThread(){
+  var list=$('#reachThreadList');
+  if(!list)return;
+  Array.prototype.forEach.call(list.querySelectorAll('button[data-th-peer]'),function(btn){
+    var on=btn.getAttribute('data-th-platform')===reachChat.platform&&btn.getAttribute('data-th-peer')===reachChat.peerId;
+    if(on)btn.classList.add('is-on');else btn.classList.remove('is-on');
+    btn.setAttribute('aria-pressed',on?'true':'false');
+  });
+}
+
+async function reachLoadThreads(){
+  var msg=$('#reachThreadsMsg'),seq=++reachThreadsSeq;
+  try{
+    var r=await api('/api/chat/threads');
+    if(seq!==reachThreadsSeq)return;
+    reachThreads=(r&&r.threads)||[];
+    reachThreadsLoaded=true;
+    var g=reachChat.ghost,i;
+    if(g){
+      for(i=0;i<reachThreads.length;i++){
+        if(reachThreads[i].platform!==g.platform||reachThreads[i].peerId!==g.peerId)continue;
+        if(!reachChat.peerName)reachChat.peerName=reachThreads[i].peerName||'';
+        reachChat.ghost=null;
+        break;
+      }
+    }
+    reachShow(msg,'');
+    reachRenderThreads();
+    reachChatHead();
+  }catch(e){
+    if(seq!==reachThreadsSeq)return;
+    reachShow(msg,'会话列表读取失败：'+e.message);
+    reachRenderThreads();
+  }
+}
+
+function reachBubble(m){
+  var out=!!(m&&m.direction==='out');
+  var fail=out&&m&&m.status==='failed';
+  var t=m&&m.at?fmtTime(m.at):'';
+  return '<div class="reach-msg '+(out?'is-out':'is-in')+'">'+
+    '<div class="reach-bub'+(fail?' is-fail':'')+'">'+
+      '<div class="reach-bub-text">'+esc(m&&m.text)+'</div>'+
+      '<div class="reach-bub-meta"><span>'+esc(t)+'</span>'+(fail?'<span class="reach-bub-fail">发送失败</span>':'')+'</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function reachRenderMessages(list){
+  var wrap=$('#reachChatList'),empty=$('#reachChatEmpty'),box=$('#reachChatMsgs');
+  var cur=reachChat,has=!!(cur.platform&&cur.peerId),msgs=Array.isArray(list)?list:[],html='',i;
+  cur.messages=msgs;
+  for(i=0;i<msgs.length;i++)html+=reachBubble(msgs[i]);
+  if(wrap){wrap.innerHTML=html;wrap.hidden=!msgs.length}
+  if(empty){
+    if(!has){
+      empty.innerHTML='<b>还没有打开会话</b><span>从左边选一个会话；或回「候选与群发」，在候选行点「打开会话」，没有历史也能直接发。</span>';
+      empty.hidden=false;
+    }else if(!msgs.length){
+      empty.innerHTML='<b>还没有消息</b><span>在下面输入框发第一条；也可以点「同步历史」把平台上的聊天记录拉过来。</span>';
+      empty.hidden=false;
+    }else empty.hidden=true;
+  }
+  if(box&&msgs.length)box.scrollTop=box.scrollHeight;
+}
+
+function reachChatLoading(){
+  var wrap=$('#reachChatList'),empty=$('#reachChatEmpty');
+  if(wrap){wrap.innerHTML='<p class="loading">读取消息…</p>';wrap.hidden=false}
+  if(empty)empty.hidden=true;
+}
+
+async function reachChatLoadMessages(){
+  var cur=reachChat;
+  if(!cur.platform||!cur.peerId){reachRenderMessages([]);return}
+  var platform=cur.platform,peerId=cur.peerId,seq=++cur.seq;
+  try{
+    var r=await api('/api/chat/messages?platform='+encodeURIComponent(platform)+'&peerId='+encodeURIComponent(peerId));
+    if(seq!==reachChat.seq||reachChat.platform!==platform||reachChat.peerId!==peerId)return;
+    reachRenderMessages((r&&r.messages)||[]);
+  }catch(e){
+    if(seq!==reachChat.seq||reachChat.platform!==platform||reachChat.peerId!==peerId)return;
+    reachRenderMessages([]);
+    var empty=$('#reachChatEmpty');
+    if(empty){
+      empty.innerHTML='<b>消息读取失败</b><span>'+esc(e.message)+'</span><div><button class="btn ghost sm" type="button" id="reachChatRetry">重试</button></div>';
+      empty.hidden=false;
+    }
+    var retry=$('#reachChatRetry');
+    if(retry)retry.onclick=function(){reachChatLoadMessages()};
+  }
+}
+
+/** 打开会话：有记录就拉消息；没有记录也照样能发（列表里先挂一个「还没有消息」的条目）。 */
+async function reachOpenChat(platform,peerId,peerName){
+  if(!platform||!peerId){toast('缺平台或用户 ID，打不开会话','err');return}
+  var cur=reachChat,hit=null,i;
+  cur.platform=platform;
+  cur.peerId=peerId;
+  cur.peerName=peerName||'';
+  cur.messages=[];
+  cur.ghost=null;
+  if(peerName)reachPeerNames[platform+':'+peerId]=peerName;
+  for(i=0;i<reachThreads.length;i++){
+    if(reachThreads[i].platform!==platform||reachThreads[i].peerId!==peerId)continue;
+    hit=reachThreads[i];
+    break;
+  }
+  if(hit&&!cur.peerName)cur.peerName=hit.peerName||reachPeerNames[platform+':'+peerId]||'';
+  if(!hit)cur.ghost={platform:platform,peerId:peerId,peerName:peerName||null,count:0,last:null};
+  reachSetTab('chat');
+  reachRenderThreads();
+  reachMarkThread();
+  reachChatHead();
+  reachChatNote('');
+  reachChatLoading();
+  await reachChatLoadMessages();
+  if($('#reachChatText'))$('#reachChatText').focus();
+}
+
+async function reachChatSend(ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  var cur=reachChat;
+  if(cur.sending)return;
+  if(!cur.platform||!cur.peerId){reachChatNote('先选一个会话：左边列表，或回候选池点「打开会话」。',true);return}
+  var ta=$('#reachChatText'),btn=$('#reachChatSend');
+  var text=ta?String(ta.value||'').trim():'';
+  if(!text){reachChatNote('内容不能为空',true);if(ta)ta.focus();return}
+  if(text.length>500){reachChatNote('最多 500 字，现在 '+text.length+' 字',true);return}
+  var platform=cur.platform,peerId=cur.peerId,peerName=cur.peerName;
+  var same=function(){return reachChat.platform===platform&&reachChat.peerId===peerId};
+  cur.sending=true;
+  if(btn){btn.disabled=true;btn.textContent='发送中…'}
+  if(ta)ta.disabled=true;
+  reachChatNote('');
+  try{
+    await post('/api/chat/send',{platform:platform,peerId:peerId,peerName:peerName||undefined,text:text});
+    if(same()){
+      if(ta)ta.value='';
+      reachChatCount();
+    }
+    reachChatNote('已发送。同一账号 3 秒内不能连发，下一条稍等。');
+    toast('已发送');
+    if(same())await reachChatLoadMessages();
+    reachLoadThreads();
+  }catch(e){
+    reachChatNote('发送失败：'+e.message,true);
+    /* 失败的那条服务端也会记下来，重新拉一次就能看到红色「发送失败」气泡。 */
+    if(same())await reachChatLoadMessages();
+    reachLoadThreads();
+  }finally{
+    cur.sending=false;
+    if(btn)btn.textContent='发送';
+    if(ta)ta.disabled=false;
+    reachChatHead();
+    if(ta)ta.focus();
+  }
+}
+
+async function reachChatSync(){
+  var cur=reachChat;
+  if(cur.syncing)return;
+  if(!cur.platform||!cur.peerId){reachChatNote('先在左边选一个会话，再同步历史。',true);return}
+  var platform=cur.platform,peerId=cur.peerId,peerName=cur.peerName;
+  var btn=$('#reachChatSync');
+  cur.syncing=true;
+  if(btn){btn.disabled=true;btn.textContent='同步中…'}
+  reachChatNote('');
+  try{
+    var r=await post('/api/chat/sync',{platform:platform,peerId:peerId,peerName:peerName||undefined});
+    var imported=Number((r&&r.imported)||0);
+    var same=reachChat.platform===platform&&reachChat.peerId===peerId;
+    if(same&&r&&Array.isArray(r.messages))reachRenderMessages(r.messages);
+    else if(same)await reachChatLoadMessages();
+    reachChatNote(imported?'已同步 '+imported+' 条新消息。':'没有新消息，平台返回的历史都已经在了。',false);
+    reachLoadThreads();
+  }catch(e){
+    reachChatNote('同步历史失败：'+e.message,true);
+  }finally{
+    cur.syncing=false;
+    if(btn)btn.textContent='同步历史';
+    reachChatHead();
+  }
+}
+
+async function reachChatRefresh(){
+  var btn=$('#reachChatReload');
+  if(btn)btn.disabled=true;
+  reachChatNote('');
+  await reachLoadThreads();
+  if(reachChat.platform&&reachChat.peerId)await reachChatLoadMessages();
+  if(btn)btn.disabled=false;
+}
+
 /* ---------------------------------------------------------------- 绑定与注册 */
 $('#reachCampForm').onsubmit=reachStartCampaign;
 $('#reachCampStop').onclick=reachStopCampaign;
@@ -713,12 +1144,49 @@ $('#reachCandAll').onchange=function(){
   reachUpdateMeta();
 };
 
+$$('.reach-tab').forEach(function(btn){
+  btn.onclick=function(){reachSetTab(btn.getAttribute('data-reach-tab'))};
+});
+if($('#reachTabs'))$('#reachTabs').onkeydown=function(ev){
+  if(ev.key!=='ArrowLeft'&&ev.key!=='ArrowRight')return;
+  ev.preventDefault();
+  var next=reachTabCur==='chat'?'cand':'chat';
+  reachSetTab(next);
+  var btn=next==='chat'?$('#reachTabChat'):$('#reachTabCand');
+  if(btn)btn.focus();
+};
+
+if($('#reachThreadList'))$('#reachThreadList').onclick=function(ev){
+  var el=ev.target;
+  while(el&&el.nodeType===1&&el!==this){
+    if(el.getAttribute&&el.getAttribute('data-th-peer')){
+      reachOpenChat(el.getAttribute('data-th-platform'),el.getAttribute('data-th-peer'),el.getAttribute('data-th-name'));
+      return;
+    }
+    el=el.parentNode;
+  }
+};
+$('#reachChatReload').onclick=reachChatRefresh;
+$('#reachChatSync').onclick=reachChatSync;
+$('#reachChatForm').onsubmit=reachChatSend;
+$('#reachChatText').oninput=reachChatCount;
+$('#reachChatText').onkeydown=function(ev){
+  if(ev.key!=='Enter'||ev.shiftKey||ev.isComposing||ev.keyCode===229)return;
+  ev.preventDefault();
+  reachChatSend();
+};
+
 /* 从别的页切回触达时也刷新一次（首次进入由 onShow 负责，避免重复请求）。 */
 document.addEventListener('click',function(ev){
   var el=ev.target;
   while(el&&el.nodeType===1){
     if(el.getAttribute&&el.getAttribute('data-go')==='reach'){
-      if(omc.shown.reach)setTimeout(function(){reachLoadCandidates();reachLoadJobs();reachLoadSettings()},0);
+      if(omc.shown.reach)setTimeout(function(){
+        reachLoadCandidates();
+        reachLoadJobs();
+        reachLoadSettings();
+        if(reachTabCur==='chat')reachLoadThreads();
+      },0);
       return;
     }
     el=el.parentNode;
@@ -728,12 +1196,14 @@ document.addEventListener('click',function(ev){
 omc.hook('refreshCandidates',reachLoadCandidates);
 omc.hook('refreshJobs',reachLoadJobs);
 omc.hook('replyTo',function(x){reachFillReply(x)});
+omc.hook('openChat',function(x){if(x&&x.platform&&x.peerId)reachOpenChat(x.platform,x.peerId,x.peerName)});
 
 omc.onShow('reach',function(){
   reachLoadActionPlatforms();
   reachLoadSettings();
   reachLoadCandidates();
   reachLoadJobs();
+  if(reachTabCur==='chat')reachLoadThreads();
 });
 `,
 }

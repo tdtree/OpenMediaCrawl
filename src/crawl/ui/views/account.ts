@@ -2,7 +2,8 @@ import type { View } from '../types.js'
 
 /**
  * 账号与设置：平台登录（扫码 / Cookie）、账号切换、登录态检查、发送参数、
- * 派生数据清理、用户管理与改自己的密码。
+ * 派生数据清理、词库管理（防抖自动保存）、用户管理、改自己的密码，
+ * 词库维护与用户管理（仅 admin）。
  */
 
 const HTML = String.raw`
@@ -73,6 +74,46 @@ const HTML = String.raw`
 </section>
 
 <section class="sec">
+  <div class="sec-head"><h2>词库管理</h2><span class="sub">采集页的关键词/评论筛选可以直接从词库导入；改动后 0.6 秒自动保存。</span></div>
+  <div class="grid2">
+    <div class="card account-lex">
+      <div class="row"><h3>搜索关键词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexKwMsg"></span><span class="badge" id="accountLexKwCount">0 个</span></div>
+      <div class="chips" id="accountLexKwChips"><span class="tiny">读取中…</span></div>
+      <div class="row account-lex-add">
+        <input id="accountLexKwInput" autocomplete="off" placeholder="回车添加，可一次粘贴多个词">
+        <button class="ghost sm" id="accountLexKwAdd" type="button">添加</button>
+      </div>
+      <div class="account-lex-bulk">
+        <label class="field"><span>一键导入</span>
+          <textarea id="accountLexKwBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开"></textarea>
+        </label>
+        <div class="row account-lex-foot">
+          <button class="ghost sm" id="accountLexKwImport" type="button">导入</button>
+          <span class="tiny" id="accountLexKwNote">最多 300 个，单个词最多 40 字。</span>
+        </div>
+      </div>
+    </div>
+    <div class="card account-lex">
+      <div class="row"><h3>评论筛选词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexFlMsg"></span><span class="badge" id="accountLexFlCount">0 个</span></div>
+      <div class="chips" id="accountLexFlChips"><span class="tiny">读取中…</span></div>
+      <div class="row account-lex-add">
+        <input id="accountLexFlInput" autocomplete="off" placeholder="回车添加，如 广告 / 引流 / 加微">
+        <button class="ghost sm" id="accountLexFlAdd" type="button">添加</button>
+      </div>
+      <div class="account-lex-bulk">
+        <label class="field"><span>一键导入</span>
+          <textarea id="accountLexFlBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开"></textarea>
+        </label>
+        <div class="row account-lex-foot">
+          <button class="ghost sm" id="accountLexFlImport" type="button">导入</button>
+          <span class="tiny" id="accountLexFlNote">最多 300 个，单个词最多 40 字。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
   <div class="sec-head"><h2>用户</h2><span class="sub">每个用户有独立的数据目录和独立登录态，互不可见。</span></div>
   <div class="card" id="accountUsersCard" hidden>
     <div class="row"><h3>用户管理</h3><span class="spacer"></span><span class="tiny" id="accountUsersMsg"></span></div>
@@ -108,7 +149,9 @@ const HTML = String.raw`
       <p class="tiny" id="accountPwSelfMsg" style="margin-top:8px">改完要重新登录，其他设备上的会话也会失效。</p>
     </form>
   </div>
-</section>`
+</section>
+
+`
 
 const CSS = String.raw`
 .account-qr{margin-top:var(--s3);padding:var(--s3);border:1px solid var(--line);border-radius:8px;text-align:center}
@@ -121,6 +164,19 @@ const CSS = String.raw`
 .account-danger{border-color:var(--danger)}
 .account-tbl td{vertical-align:middle}
 .account-tbl td .row{flex-wrap:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-top:var(--s3);min-height:32px}
+.chips .chip{display:inline-flex;align-items:center;gap:2px;max-width:100%;font-size:var(--fs-xs);padding:1px 3px 1px 7px;border:1px solid var(--line);border-radius:3px;background:var(--row-hover);color:var(--fg);word-break:break-all}
+.chips .chip-x{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-sm);line-height:1;min-height:0;padding:0 4px;border-radius:2px;cursor:pointer}
+.chips .chip-x:hover{background:var(--danger-soft);color:var(--danger)}
+.account-lex-add{margin-top:var(--s3);flex-wrap:nowrap}
+.account-lex-add input{flex:1;min-width:0}
+.account-lex-add button{flex:none}
+.account-lex-bulk{margin-top:var(--s3);padding-top:var(--s3);border-top:1px dashed var(--line)}
+.account-lex-foot{margin-top:var(--s2)}
+.account-lex-msg{font-variant-numeric:tabular-nums}
+.account-lex-err{color:var(--danger)}
+.account-usage-io{font-variant-numeric:tabular-nums}
+.account-usage-io .tiny{font-variant-numeric:tabular-nums;margin-top:1px}
 `
 
 const JS = String.raw`
@@ -334,7 +390,199 @@ async function accountLoadSettings(){
   }
 }
 
-/* ---------------------------------------------------------------- ③ 用户 */
+/* ---------------------------------------------------------------- ③ 词库（防抖自动保存） */
+var accountLexMax=300,accountLexMaxLen=40;
+var accountLex={data:{keywords:[],filters:[]},ready:false,timer:null,saving:false,again:false};
+var accountLexNames={keywords:'搜索关键词库',filters:'评论筛选词库'};
+var accountLexIds={
+  keywords:{chips:'accountLexKwChips',count:'accountLexKwCount',input:'accountLexKwInput',add:'accountLexKwAdd',bulk:'accountLexKwBulk',importBtn:'accountLexKwImport',msg:'accountLexKwMsg',note:'accountLexKwNote'},
+  filters:{chips:'accountLexFlChips',count:'accountLexFlCount',input:'accountLexFlInput',add:'accountLexFlAdd',bulk:'accountLexFlBulk',importBtn:'accountLexFlImport',msg:'accountLexFlMsg',note:'accountLexFlNote'}
+};
+
+/** 与服务端 splitTerms 一致：空格、斜杠、逗号、顿号、分号都当分隔符。 */
+function accountLexSplit(text){
+  return String(text==null?'':text).split(/[\s\/，,、;；|]+/).map(function(t){return t.trim()}).filter(function(t){return !!t});
+}
+
+function accountLexClock(){
+  var d=new Date();
+  return (d.getHours()<10?'0':'')+d.getHours()+':'+(d.getMinutes()<10?'0':'')+d.getMinutes();
+}
+
+/** 保存状态写在两张卡右上角（同一份词库，两处同步显示）。 */
+function accountLexStatus(text,err){
+  ['keywords','filters'].forEach(function(kind){
+    var el=$('#'+accountLexIds[kind].msg);
+    if(!el)return;
+    el.textContent=text||'';
+    el.className='tiny account-lex-msg'+(err?' account-lex-err':'');
+  });
+}
+
+/** 卡片底部的即时反馈：加了几条、跳过几条、为什么加不进去。 */
+function accountLexNote(kind,text,err){
+  var el=$('#'+accountLexIds[kind].note);
+  if(!el)return;
+  el.textContent=text||'';
+  el.className='tiny'+(err?' account-lex-err':'');
+}
+
+function accountLexRender(kind){
+  var ids=accountLexIds[kind];
+  var box=$('#'+ids.chips),cnt=$('#'+ids.count);
+  if(!box||!cnt)return;
+  var list=accountLex.data[kind]||[];
+  cnt.textContent=list.length+' 个'+(list.length>=accountLexMax?'（已满）':'');
+  if(!list.length){
+    box.innerHTML='<span class="tiny">空词库：输入一个词回车就能加进来。</span>';
+    return;
+  }
+  var html=[];
+  for(var i=0;i<list.length;i++){
+    var word=esc(list[i]);
+    html.push('<span class="chip">'+word+'<button type="button" class="chip-x" title="删除" aria-label="删除 '+word+'" data-account-lex-word="'+word+'">×</button></span>');
+  }
+  box.innerHTML=html.join('');
+  $$('button[data-account-lex-word]',box).forEach(function(b){
+    b.onclick=function(){accountLexRemove(kind,b.getAttribute('data-account-lex-word'))};
+  });
+}
+
+function accountLexRenderAll(){accountLexRender('keywords');accountLexRender('filters')}
+
+/** 拆词后去重追加；超 40 字截断，到 300 个后不再加（服务端也会这样清洗）。 */
+function accountLexPush(kind,terms){
+  var list=(accountLex.data[kind]||[]).slice();
+  var seen={},added=0,dup=0,full=0,cut=0;
+  for(var i=0;i<list.length;i++)seen[list[i]]=1;
+  for(var j=0;j<terms.length;j++){
+    var word=String(terms[j]==null?'':terms[j]).trim();
+    if(!word)continue;
+    if(word.length>accountLexMaxLen){word=word.slice(0,accountLexMaxLen);cut++}
+    if(seen[word]){dup++;continue}
+    if(list.length>=accountLexMax){full++;continue}
+    seen[word]=1;
+    list.push(word);
+    added++;
+  }
+  if(added){
+    accountLex.data[kind]=list;
+    accountLexRender(kind);
+    accountLexTouch();
+  }
+  return {added:added,dup:dup,full:full,cut:cut};
+}
+
+function accountLexStatText(stat){
+  if(!stat.added&&!stat.dup&&!stat.full)return '没有可添加的词';
+  var parts=[];
+  if(stat.added)parts.push('已添加 '+stat.added+' 个');
+  if(stat.dup)parts.push('重复 '+stat.dup+' 个已跳过');
+  if(stat.full)parts.push('到 300 个上限，'+stat.full+' 个没加');
+  if(stat.cut)parts.push('超 40 字的截断 '+stat.cut+' 个');
+  return parts.join('，');
+}
+
+function accountLexAdd(kind,text){
+  if(!accountLex.ready){accountLexNote(kind,'词库没读到，刷新页面再改',true);return}
+  var raw=String(text==null?'':text);
+  if(!raw.trim()){accountLexNote(kind,'先在输入框里写一个词',true);return}
+  var stat=accountLexPush(kind,accountLexSplit(raw));
+  accountLexNote(kind,accountLexStatText(stat),!stat.added);
+}
+
+function accountLexAddFromInput(kind){
+  var input=$('#'+accountLexIds[kind].input);
+  if(!input)return;
+  accountLexAdd(kind,input.value);
+  if(input.value)input.value='';
+  input.focus();
+}
+
+function accountLexImport(kind){
+  if(!accountLex.ready){accountLexNote(kind,'词库没读到，刷新页面再改',true);return}
+  var ta=$('#'+accountLexIds[kind].bulk);
+  var terms=accountLexSplit(ta?ta.value:'');
+  if(!terms.length){accountLexNote(kind,'粘贴框里还没有词',true);if(ta)ta.focus();return}
+  var stat=accountLexPush(kind,terms);
+  if(ta){ta.value='';ta.focus()}
+  var text=accountLexNames[kind]+'：'+accountLexStatText(stat);
+  accountLexNote(kind,accountLexStatText(stat),!stat.added);
+  toast(text);
+}
+
+function accountLexRemove(kind,word){
+  if(!accountLex.ready)return;
+  var list=(accountLex.data[kind]||[]).filter(function(w){return w!==word});
+  if(list.length===(accountLex.data[kind]||[]).length)return;
+  accountLex.data[kind]=list;
+  accountLexRender(kind);
+  accountLexNote(kind,'已删除「'+word+'」',false);
+  accountLexTouch();
+}
+
+function accountLexTouch(){
+  accountLexStatus('待保存…',false);
+  accountLexSchedule();
+}
+
+function accountLexSchedule(){
+  if(accountLex.timer)clearTimeout(accountLex.timer);
+  accountLex.timer=setTimeout(function(){accountLex.timer=null;accountLexSave()},600);
+}
+
+/** 离开页面时把没到点的改动立刻发出去，别等防抖。 */
+function accountLexFlush(){
+  if(!accountLex.timer)return;
+  clearTimeout(accountLex.timer);
+  accountLex.timer=null;
+  accountLexSave();
+}
+
+/** 服务端清洗后的结果只在「保存期间没再改过这一栏」时才回填。 */
+function accountLexAdopt(kind,payloadList,server){
+  if(!Array.isArray(server))return;
+  var local=accountLex.data[kind]||[];
+  if(JSON.stringify(local)!==JSON.stringify(payloadList))return;
+  if(JSON.stringify(server)===JSON.stringify(payloadList))return;
+  accountLex.data[kind]=server.slice();
+  accountLexRender(kind);
+}
+
+async function accountLexSave(){
+  if(!accountLex.ready)return;
+  if(accountLex.saving){accountLex.again=true;return}
+  accountLex.saving=true;
+  var payload={keywords:(accountLex.data.keywords||[]).slice(),filters:(accountLex.data.filters||[]).slice()};
+  accountLexStatus('保存中…',false);
+  try{
+    var r=await post('/api/lexicon',payload);
+    accountLexAdopt('keywords',payload.keywords,r?r.keywords:null);
+    accountLexAdopt('filters',payload.filters,r?r.filters:null);
+    accountLexStatus('已保存 '+accountLexClock(),false);
+  }catch(e){
+    accountLex.again=false;
+    accountLexStatus('保存失败：'+e.message,true);
+  }finally{
+    accountLex.saving=false;
+    if(accountLex.again){accountLex.again=false;accountLexSave()}
+  }
+}
+
+async function accountLexLoad(){
+  try{
+    var r=await api('/api/lexicon');
+    accountLex.data.keywords=Array.isArray(r&&r.keywords)?r.keywords.slice():[];
+    accountLex.data.filters=Array.isArray(r&&r.filters)?r.filters.slice():[];
+    accountLex.ready=true;
+    accountLexRenderAll();
+    accountLexStatus('',false);
+  }catch(e){
+    accountLexStatus('词库读取失败：'+e.message,true);
+  }
+}
+
+/* ---------------------------------------------------------------- ④ 用户 */
 async function accountLoadUsers(){
   var tb=$('#accountUserList');if(!tb)return;
   if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="4"><p class="loading">读取中…</p></td></tr>';
@@ -424,18 +672,101 @@ function accountOpenPwReset(name){
   $('#accountPwResetInput').focus();
 }
 
+/* ---------------------------------------------------------------- ⑤ 账户使用情况（仅 admin） */
+/** 字节按量级换单位，小数值留一位，大数值取整。 */
+function accountBytes(v){
+  var n=Number(v);
+  if(!isFinite(n)||n<=0)return '0 B';
+  if(n<1024)return Math.round(n)+' B';
+  var kb=n/1024;
+  if(kb<1024)return (kb<10?kb.toFixed(1):String(Math.round(kb)))+' KB';
+  var mb=kb/1024;
+  if(mb<1024)return (mb<10?mb.toFixed(1):String(Math.round(mb)))+' MB';
+  return (mb/1024).toFixed(1)+' GB';
+}
+
+/** 最近活跃按本地时区显示 YYYY-MM-DD HH:mm（服务端给的是 ISO）。 */
+function accountUsageTime(iso){
+  if(!iso)return '还没动过';
+  var d=new Date(iso);
+  if(!d.getTime()||isNaN(d.getTime()))return fmtTime(iso)||'还没动过';
+  var pad=function(v){return (v<10?'0':'')+v};
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+
+function accountUsageStatus(st){
+  return st==='pending'?'<span class="badge warn">待审核</span>'
+    :st==='disabled'?'<span class="badge err">已停用</span>'
+    :'<span class="badge ok">正常</span>';
+}
+
+function accountUsageRow(u){
+  return '<tr>'+
+    '<td data-label="用户">'+esc(u.username)+(u.role==='admin'?' <span class="badge warn">admin</span>':'')+'</td>'+
+    '<td data-label="状态">'+accountUsageStatus(u.status||'active')+'</td>'+
+    '<td class="num" data-label="作品">'+esc(u.items==null?0:u.items)+'</td>'+
+    '<td class="num" data-label="评论">'+esc(u.comments==null?0:u.comments)+'</td>'+
+    '<td class="num" data-label="线索">'+esc(u.leads==null?0:u.leads)+'</td>'+
+    '<td class="num" data-label="已发私信">'+esc(u.sent==null?0:u.sent)+'</td>'+
+    '<td class="num" data-label="登录态">'+esc(u.logins==null?0:u.logins)+'</td>'+
+    '<td data-label="数据占用"><div class="account-usage-io">'+esc(accountBytes(u.bytes))+
+      '<div class="tiny">授权文件 '+esc(accountBytes(u.authBytes))+'</div></div></td>'+
+    '<td data-label="最近活跃">'+esc(accountUsageTime(u.lastActive))+'</td>'+
+    '</tr>';
+}
+
+function accountUsageSummary(list){
+  var el=$('#accountUsageSum');if(!el)return;
+  var pending=0,leads=0,bytes=0,authBytes=0;
+  list.forEach(function(u){
+    if((u.status||'active')==='pending')pending++;
+    leads+=Number(u.leads)||0;
+    bytes+=Number(u.bytes)||0;
+    authBytes+=Number(u.authBytes)||0;
+  });
+  el.textContent='共 '+list.length+' 个用户（待审核 '+pending+'）· 总线索 '+leads+' 条 · 总占用 '+accountBytes(bytes)+'，其中授权文件 '+accountBytes(authBytes);
+}
+
+async function accountLoadUsage(btn){
+  var tb=$('#accountUsageList');if(!tb)return;
+  if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="9"><p class="loading">读取中…</p></td></tr>';
+  if(btn)accountBtn(btn,true,'刷新中…');
+  $('#accountUsageMsg').textContent='读取中…';
+  try{
+    var r=await api('/api/admin/usage');
+    var list=(r&&r.users)||[];
+    if(!list.length){
+      tb.innerHTML='<tr><td colspan="9"><div class="empty"><b>还没有账户数据</b>新建用户或有人开始采集后，这里会显示每个作品、线索和磁盘占用。</div></td></tr>';
+      tb.dataset.loaded='1';
+      accountUsageSummary([]);
+      $('#accountUsageMsg').textContent='';
+      return;
+    }
+    tb.innerHTML=list.map(accountUsageRow).join('');
+    tb.dataset.loaded='1';
+    accountUsageSummary(list);
+    $('#accountUsageMsg').textContent='更新于 '+accountLexClock();
+  }catch(e){
+    $('#accountUsageMsg').textContent='读取失败：'+e.message;
+    if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="9"><p class="empty">'+esc(e.message)+'</p></td></tr>';
+  }finally{if(btn)accountBtn(btn,false)}
+}
+
 /* ---------------------------------------------------------------- 进入页面时加载 */
 async function accountLoad(){
   var me=omc.state.me||{};
+  var isAdmin=me.role==='admin';
   $('#accountMeName').textContent=me.username||'-';
-  $('#accountUsersCard').hidden=me.role!=='admin';
-  if(me.role!=='admin'){
+  $('#accountUsersCard').hidden=!isAdmin;
+  if(!isAdmin){
     accountPwUser=null;
     $('#accountPwReset').hidden=true;
   }
   await accountLoadPlatforms();
   var jobs=[accountLoadAccounts(),accountLoadSettings()];
-  if(me.role==='admin')jobs.push(accountLoadUsers());
+  /* 有没保存的词库改动时保留本地，别被服务端旧数据盖掉 */
+  if(!accountLex.timer&&!accountLex.saving)jobs.push(accountLexLoad());
+  if(isAdmin)jobs.push(accountLoadUsers());
   await Promise.all(jobs);
   if(accountLoginId)accountWatch(accountLoginId,true);
 }
@@ -450,12 +781,31 @@ document.addEventListener('click',function(ev){
   if(!nav)return;
   if(nav.dataset.go==='account'){
     if(omc.shown&&omc.shown.account)accountLoad();
-  }else if(accountQrTimer){
-    accountStopPoll();
+  }else{
+    accountLexFlush();
+    if(accountQrTimer)accountStopPoll();
   }
 },true);
 
 /* ---------------------------------------------------------------- 绑定 */
+/* 词库：回车添加（含中文输入法保护）、添加按钮、一键导入 */
+function accountLexBind(kind){
+  var ids=accountLexIds[kind];
+  var input=$('#'+ids.input);
+  if(input){
+    input.onkeydown=function(ev){
+      if(ev.isComposing||ev.keyCode===229)return;
+      if(ev.key==='Enter'){ev.preventDefault();accountLexAddFromInput(kind)}
+    };
+  }
+  var add=$('#'+ids.add);
+  if(add)add.onclick=function(){accountLexAddFromInput(kind)};
+  var imp=$('#'+ids.importBtn);
+  if(imp)imp.onclick=function(){accountLexImport(kind)};
+}
+accountLexBind('keywords');
+accountLexBind('filters');
+
 $('#accountPlatform').onchange=function(){
   accountStopPoll();
   accountLoginId=null;
@@ -598,7 +948,7 @@ export const account: View = {
   id: 'account',
   nav: '账号与设置',
   title: '账号与设置',
-  sub: '平台登录状态、发送参数和用户管理。',
+  sub: '平台登录状态、发送参数、词库与账户使用情况、用户管理。',
   css: CSS,
   html: HTML,
   js: JS,

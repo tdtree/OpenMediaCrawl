@@ -29,6 +29,7 @@ window.omc=omc;
 
 function go(id){
   if(!omc.views[id])id='overview';
+  if(id==='admin'&&(!omc.state.me||omc.state.me.role!=='admin')){id='overview';if(location.hash!=='#/overview')history.replaceState(null,'','#/overview')}
   $$('.view').forEach(function(s){s.hidden=s.dataset.view!==id});
   $$('.nav-item').forEach(function(b){if(b.dataset.go===id)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
   var m=omc.meta[id]||{};
@@ -85,6 +86,8 @@ function showApp(){
   $('#login').hidden=true;$('#app').hidden=false;
   var me=omc.state.me||{};
   $('#who').innerHTML='<b>'+esc(me.username||'')+'</b>'+(me.role==='admin'?' · admin':'');
+  var gh=$('.side-link');if(gh)gh.hidden=me.role!=='admin';
+  var navAdmin=$('#navAdmin');if(navAdmin)navAdmin.hidden=me.role!=='admin';
   var start=location.hash.indexOf('#/')===0?location.hash.slice(2):'overview';
   go(start);
   omc._login.forEach(function(f){try{f()}catch(e){console.error(e)}});

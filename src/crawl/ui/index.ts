@@ -7,9 +7,10 @@ import { crawl } from './views/crawl.js'
 import { leads } from './views/leads.js'
 import { reach } from './views/reach.js'
 import { account } from './views/account.js'
+import { admin } from './views/admin.js'
 
 /** 侧栏顺序即数组顺序。 */
-export const VIEWS: View[] = [overview, crawl, leads, reach, account]
+export const VIEWS: View[] = [overview, crawl, leads, reach, account, admin]
 
 /** 把主题、壳、各视图拼成一整页（零依赖：服务端一次性拼字符串）。 */
 export function renderPage(): string {
