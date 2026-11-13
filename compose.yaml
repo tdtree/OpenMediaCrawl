@@ -26,6 +26,21 @@ services:
     stdin_open: true
     tty: true
 
+  # Web 控制台（采集 / 线索 / 私信 / 用户管理），镜像见 Dockerfile.web
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: openmediacrawl-web:local
+    ports:
+      - "8080:8080"
+    environment:
+      OMC_ADMIN_PASSWORD: ${OMC_ADMIN_PASSWORD:-}
+      OMC_HOME: /data/omc
+    volumes:
+      - omc-data:/data
+    restart: unless-stopped
+
   live-listen:
     <<: *catbus
     profiles: [listen]
@@ -37,3 +52,4 @@ services:
 
 volumes:
   catbus-data:
+  omc-data:

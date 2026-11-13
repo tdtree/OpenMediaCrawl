@@ -68,3 +68,31 @@ ROOM=<直播间> PLATFORM=douyin DURATION=2h docker compose --profile listen up 
 
 - `make docker` 构建镜像，`make docker-doctor` 在镜像里跑 `catbus doctor`（见 [Makefile](../../Makefile)）。
 - CI 的 [docker.yml](../../.github/workflows/docker.yml) 在 x64 与 arm64 上构建镜像并跑 `version` / `doctor`，只构建，不推送到任何镜像仓库。
+
+## Web 控制台镜像（ghcr.io）
+
+上面的 `Dockerfile` 是 CLI 镜像；只想跑网页版（采集 / 线索 / 私信 / 用户管理）用 `Dockerfile.web`，CI 会把镜像推到 GitHub Container Registry：
+
+```
+ghcr.io/tdtree/openmediacrawl:latest      # main 每次推送自动构建
+ghcr.io/tdtree/openmediacrawl:sha-xxxxxxx # 某一提交
+ghcr.io/tdtree/openmediacrawl:v1.2.3      # 打 tag 时
+```
+
+另一台机器上拉取并运行：
+
+```bash
+# 包是私有时先登录（PAT 勾 read:packages）；在 GitHub → Packages 里把可见性改成 public 后可以匿名拉
+echo <你的 PAT> | docker login ghcr.io -u tdtree --password-stdin
+
+docker pull ghcr.io/tdtree/openmediacrawl:latest
+
+docker run -d --name omc   -p 8080:8080   -v omc-data:/data   -e OMC_ADMIN_PASSWORD='换成你的密码'   -e TZ=Asia/Shanghai   --restart unless-stopped   ghcr.io/tdtree/openmediacrawl:latest
+```
+
+- 打开 `http://<机器IP>:8080`，用 `admin` + `OMC_ADMIN_PASSWORD` 登录；没设这个变量时密码会随机生成并打印在 `docker logs omc` 里。
+- 数据都在卷 `/data`：`/data/omc/users.json`（账号与审核状态）+ `/data/output/users/<用户名>/`（作品、评论、线索、发送记录、登录态）。备份这个卷即可整体迁移。
+- 镜像内监听 `0.0.0.0:8080`；`EXPOSE 8080` 已声明，健康检查每 30 秒打一次 `/`。
+- 镜像不含京东验证码 / OCR 模型（这两个平台在 Web 版里会报缺模型）；需要这些能力请用 CLI 镜像。
+- 想用 compose：`docker compose up -d web`（服务名 `web`，同样挂 `omc-data` 卷）。
+

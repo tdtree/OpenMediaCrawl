@@ -11,7 +11,7 @@ const HELP = `OpenMediaCrawl — 批量采集小红书 / 抖音 / 快手 / B站 
 用法:
   mediacrawl crawl --platform <xhs|douyin|kuaishou|bilibili|weibo|tiktok|x> --type <search|detail|creator> [选项]
   mediacrawl wordcloud --in <评论文件 .jsonl|.json|.csv> --out cloud.png
-  mediacrawl ui [--port 8080] [--out ./data]
+  mediacrawl ui [--port 8080] [--host 127.0.0.1] [--out ./data]
 
 crawl 选项:
   --keywords "词1,词2"     search：关键词（逗号分隔）
@@ -73,8 +73,10 @@ export async function runOpenMediaCommand(argv: string[]): Promise<number> {
       return 0
     }
     if (command === 'ui') {
-      const handle = await startUiServer({ port: Number(flags.port ?? positionals[0] ?? 8080), out: String(flags.out ?? DEFAULT_CRAWL_OPTIONS.out) })
-      process.stderr.write(`OpenMediaCrawl UI: http://${handle.host}:${handle.port}\n`)
+      const host = String(flags.host ?? process.env.OMC_UI_HOST ?? '127.0.0.1')
+      const handle = await startUiServer({ port: Number(flags.port ?? positionals[0] ?? 8080), host, out: String(flags.out ?? DEFAULT_CRAWL_OPTIONS.out) })
+      const shown = handle.host === '0.0.0.0' || handle.host === '::' ? '127.0.0.1' : handle.host
+      process.stderr.write(`OpenMediaCrawl UI: http://${shown}:${handle.port}${handle.host === '0.0.0.0' ? `（监听 0.0.0.0:${handle.port}，容器/局域网可访问）` : ''}\n`)
       if (handle.bootstrap) {
         process.stderr.write(`\n首次启动，已创建管理员 ${handle.bootstrap.username} / ${handle.bootstrap.password}\n登录后可在页面里改密码或新建用户；用户数据各自独立，admin 能看到全部。\n\n`)
       }

@@ -1,0 +1,50 @@
+# OpenMediaCrawl Web 控制台镜像：只跑 `mediacrawl ui`，不带 JD/OCR 验证码模型（体积小、构建快）。
+# CLI 全部平台能力请用根目录的 Dockerfile（catbus 镜像）。
+#
+#   docker build -f Dockerfile.web -t openmediacrawl-web .
+#   docker run --rm -p 8080:8080 -v omc-data:/data -e OMC_ADMIN_PASSWORD=换成你的密码 openmediacrawl-web
+#
+# 镜像：ghcr.io/tdtree/openmediacrawl:latest
+
+ARG NODE_VERSION=24
+
+# ---------------------------------------------------------------- 构建
+FROM node:${NODE_VERSION}-bookworm-slim AS build
+WORKDIR /src
+
+COPY package.json package-lock.json ./
+COPY packages/assets-jd/package.json packages/assets-jd/
+COPY packages/assets-ocr/package.json packages/assets-ocr/
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+RUN npm run build
+
+# ---------------------------------------------------------------- 运行
+FROM node:${NODE_VERSION}-bookworm-slim
+
+LABEL org.opencontainers.image.title="OpenMediaCrawl Web" \
+      org.opencontainers.image.description="OpenMediaCrawl 本地 Web 控制台：采集 / 线索 / 私信 / 用户管理" \
+      org.opencontainers.image.source="https://github.com/tdtree/OpenMediaCrawl" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV NODE_ENV=production \
+    TZ=Asia/Shanghai \
+    OMC_HOME=/data/omc \
+    OMC_UI_HOST=0.0.0.0
+
+WORKDIR /app
+COPY --from=build /src/package.json ./
+COPY --from=build /src/node_modules node_modules
+COPY --from=build /src/dist dist
+COPY --from=build /src/packages packages
+
+RUN mkdir -p /data/output && chmod 700 /data
+VOLUME ["/data"]
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+  CMD node -e "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# 用户数据（含每个用户的登录态）都在 /data：/data/omc/users.json + /data/output/users/<用户名>/
+CMD ["node", "dist/cli/main.js", "ui", "--port", "8080", "--host", "0.0.0.0", "--out", "/data/output"]
