@@ -4,6 +4,54 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]（批量采集层）
+
+### Added
+
+- 按 Web Interface Guidelines 做了无障碍/交互收口：新增跳转主内容链接、`<main>` 语义、toast `role=status aria-live`、`theme-color`、`text-wrap:balance`、`touch-action:manipulation`、`overscroll-behavior`、`prefers-reduced-motion`、移动端 40px 点按高度、评论卡片 `content-visibility`
+- 概览柱状图刻度统一为 `MM-DD`，移动端不再只显示日号
+
+- 视觉方向改为「台账 / 蓝铅笔批注」：墨黑正文（#171a1e）、纸白底（#f6f6f3）、单一信号色靛蓝（#1c46c8）；标题用宋体（Songti/SimSun），正文系统黑体；卡片圆角 10→6、输入 6→4、徽标从胶囊改 3px 方签；侧栏选中改为左侧 2px 竖线
+- 概览的 4 个指标从「四张同款卡片」改为一条带上下细线、竖线分隔的台账式数据行；柱状图去掉零值柱与圆角，只保留基线、刻度和当天柱
+
+- 线索表去掉恒空的「命中词」列（自动同步不按意向词过滤）；表格表头在表格区内吸顶，表格最高占满一屏（`calc(100vh-170px)`）自带滚动
+- 采集表单「评论」默认勾选；二级评论勾选会自动带上评论
+- 线索搜索框与采集页评论筛选统一口径：空格或 `/` 分隔、OR 匹配、大小写不敏感
+
+- 评论采集默认不再截断：`maxComments` 默认 0 = 不限，客户端在 0 时传 `--all`（自动翻页）；表单高级组可填上限
+- `scripts/backfill-comments.mjs`：按作品补全已落盘评论（`--all` 一级 + `--replies` 楼中楼），按 comment id 增量合并，默认干跑，`--write` 先备份
+- 线索搜索支持多关键词：`q` 按空格或 `/` 拆分，OR 匹配评论正文与昵称
+- `POST /api/leads/sync`：把已采评论全量同步进线索库（按评论 ID 去重），前端打开线索页时自动调用，去掉手动「生成线索」
+- `POST /api/candidates/bulk`：评论多选后批量加入回复/私信候选
+
+- 前端重构为「侧栏 + 5 个视图」：概览 / 采集 / 线索 / 触达 / 账号与设置，hash 路由（`#/leads`），单文件从 573 行拆成 `src/crawl/ui/{theme,shell,kit,index}.ts` + `views/*.ts`
+- 概览：4 个指标、14 天柱状（基线/刻度/今日高亮/0 值底线）、平台占比、运行状态，全部走设计令牌，无图表库
+- 采集：表单分基础/范围/高级三组，主按钮定宽右对齐；已采数据改 master-detail（作品列表 + 评论树），评论可直接加候选或回复
+- 线索：表格化（勾选/评论者/评论/联系方式/地域/命中词/时间/详情），筛选即查（300ms 防抖）、行内展开详情、分页 50 条、导出全部或选中
+- 触达：候选池（勾选批量移除）+ 群发设置 + SSE 日志 + 任务列表（可停止、可展开日志）+ 单条互动折叠
+- 账号与设置：平台登录（扫码/ Cookie / 健康检查）、发送参数、危险区、用户管理（admin），普通用户只能改自己密码
+- 新增 `GET /api/leads/stats`（全库总数/有联系方式数/省份列表）、`GET /api/jobs/:id/log`（任务日志按行返回）、`/api/leads/export.csv` 支持 `ids=` 导出选中
+- 导出上限从 500 放开到 20000（`LeadStore.query` 支持 `maxLimit`）
+
+- 地域：`Comment` 增加可选 `province`，抖音 web 评论把 `ip_label` 透传进来（其他平台暂空）；线索支持按省份过滤，仪表盘 / 线索列表 / CSV 都会显示地域
+- `scripts/backfill-province.mjs`：给已落盘的评论按作品补地域（含楼中楼），默认干跑，`--write` 才改文件并先存 `.bak`
+
+- 本地 Web UI 多用户：用户存 `<OMC_HOME|~/.openmediacrawl>/users.json`（`OMC_USERS_FILE` 可覆盖路径），密码 scrypt 哈希，角色 `admin` / `user`，任何时候至少保留一个 admin；首次启动自动建 `admin`，密码取 `OMC_ADMIN_PASSWORD`，没设就随机生成并打印在终端
+- 登录会话：`POST /api/login`、`POST /api/logout`、`GET /api/me`，会话在内存里，cookie 为 `omc_session`（HttpOnly、SameSite=Lax、7 天），进程重启需重新登录，改密码 / 改角色 / 删用户会立刻失效该用户的会话
+- `GET|POST /api/users`、`DELETE /api/users/:name`、`POST /api/users/:name/role`、`POST /api/users/:name/password`；页面给 admin 提供用户列表、新建、删除、升降权
+- 按用户隔离：采集数据写到 `<--out>/users/<用户名>/`，登录态用独立的 `CATBUS_HOME`（`<--out>/users/<用户名>/.catbus/`）；`/api/jobs` 只返回自己的任务，`/api/files` 增加 `user=` 参数（admin 可读其他用户），页面里 admin 能看到所有人的任务
+- 互动面板：`POST /api/action` → `src/crawl/actions.ts` → 子进程调 CLI，发评论 `<平台> comment add <目标> <文本> [--reply-to <评论 ID>]`、发私信 `<平台> msg send <文本> --to <目标>`；平台白名单为 comment = douyin、bilibili，dm = douyin、xhs、tiktok、xianyu、taobao、jd，新增 `GET /api/actions/platforms`
+- 互动限流：同一平台 + 账号最小间隔 3 秒（`MEDIACRAWL_ACTION_INTERVAL_MS` 可改），太快返回 `TOO_FAST`；正文上限 500 字；不重试，风控和登录失效把错误原样透出
+- 结果预览改为详情抽屉：点卡片在右侧展开封面、标题、正文、作者、赞 / 评 / 收藏和原页链接，不再直接跳转
+- `src/crawl/client.ts` 的 `runCatbus` 接受 `env`，可以给每次子进程调用指定 per-user 的 `CATBUS_HOME`
+- 新增 `docs/guide/users.md`
+
+### Changed
+
+- `POST /api/login` 改为用户名 + 密码登录（原来用于启动扫码登录）；扫码登录启动改到 `POST /api/login/start`，`GET /api/login/:id` 不变
+- 本地 Web UI 重写：左侧账号区（平台下拉、扫码登录、二维码、粘贴 Cookie 登录、账号列表带「切换」），结果预览区把 SSE 的 item 事件实时渲染成卡片、点开原页；新增 `GET /api/platforms`、`GET /api/accounts?platform=`、`POST /api/accounts/use`、`POST /api/login`、`GET /api/login/:id`、`GET /api/qrcode?platform=`，原有 `/`、`/api/jobs`、`/api/jobs/:id/events`、`/api/files` 不变
+- 断点续爬升级为关键词级 + 游标级：状态文件新增 `tasks`（按 `search:<关键词>` / `creator:<博主 id>` 记 `cursor` 和 `done`）和 `finished`（上一轮是否正常跑完）；上一轮正常跑完时 id 只当去重集合、关键词重查一遍，上一轮中断时已完成的任务整段跳过、没跑完的从存下的游标继续，游标每拿到一次就落盘
+
 ## [0.1.0] - 2026-11-01
 
 ### Added

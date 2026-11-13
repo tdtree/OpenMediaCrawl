@@ -6,7 +6,7 @@ export const CRAWL_PLATFORMS: CrawlPlatform[] = ['xhs', 'douyin', 'kuaishou', 'b
 export const CRAWL_TYPES: CrawlType[] = ['search', 'detail', 'creator']
 
 export const DEFAULT_CRAWL_OPTIONS: Omit<CrawlOptions, 'platform' | 'type'> = {
-  keywords: [], ids: [], creators: [], maxItems: 50, comments: false, subComments: false, maxComments: 20,
+  keywords: [], ids: [], creators: [], maxItems: 50, comments: false, subComments: false, maxComments: 0,
   media: false, save: 'jsonl', out: './data', sleep: '2-5', quiet: false,
 }
 
@@ -59,7 +59,7 @@ export function normalizeCrawlOptions(input: Record<string, unknown>): CrawlOpti
     maxItems: Number(input.maxItems ?? DEFAULT_CRAWL_OPTIONS.maxItems),
     comments: bool('comments', DEFAULT_CRAWL_OPTIONS.comments),
     subComments: bool('subComments', DEFAULT_CRAWL_OPTIONS.subComments),
-    maxComments: Number(input.maxComments ?? DEFAULT_CRAWL_OPTIONS.maxComments),
+    maxComments: Math.max(0, Number(input.maxComments ?? DEFAULT_CRAWL_OPTIONS.maxComments)),
     media: bool('media', DEFAULT_CRAWL_OPTIONS.media),
     save, out: String(input.out ?? DEFAULT_CRAWL_OPTIONS.out),
     sleep: String(input.sleep ?? DEFAULT_CRAWL_OPTIONS.sleep),

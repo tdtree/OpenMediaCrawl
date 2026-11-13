@@ -66,6 +66,8 @@ catbus weibo auth login --cookie "<从浏览器复制的完整 Cookie>"
 
 cookie 要从 DevTools → Network 里某个请求的请求头复制，`document.cookie` 拿不到 HttpOnly 的关键 cookie。详见 [login.md](login.md)。
 
+不想打命令时也可以 `mediacrawl ui --port 8080` 打开本地网页。首次启动会建管理员 `admin`，随机密码打印在终端（想自己定就先设 `OMC_ADMIN_PASSWORD`），打开页面要先登录才能用；左侧账号区直接扫码登录或粘贴 Cookie，登录态存在该用户自己的数据目录 `<--out>/users/<用户名>/.catbus/`（`--out` 默认 `./data`），多用户和数据隔离见 [users.md](users.md)。
+
 确认登录态：
 
 ```bash

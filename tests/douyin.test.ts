@@ -1254,3 +1254,13 @@ describe('douyin 审查修复：TOS 上传', () => {
     }
   })
 })
+
+describe('douyin 归一化：IP 属地', () => {
+  it('评论把 ip_label 透出成 province，缺失时为 undefined', async () => {
+    const { comment } = await import('../src/platforms/douyin/web/normalize.js')
+    const withIp = comment({ cid: '1', aweme_id: '9', text: 'x', ip_label: '辽宁', user: { uid: 'u', nickname: 'n' } }, '9')
+    expect(withIp.province).toBe('辽宁')
+    const noIp = comment({ cid: '2', aweme_id: '9', text: 'y', user: { uid: 'u', nickname: 'n' } }, '9')
+    expect(noIp.province).toBeUndefined()
+  })
+})

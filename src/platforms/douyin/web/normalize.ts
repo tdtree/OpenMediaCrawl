@@ -131,6 +131,7 @@ export function comment(c: any, itemId: string): Comment {
       author: authorRef(c.user),
       text: String(c.text ?? ''),
       created_at: n.time(c.create_time),
+      province: typeof c.ip_label === 'string' && c.ip_label ? c.ip_label : null,
       stats: { likes: n.count(c.digg_count), replies: n.count(c.reply_comment_total) },
     },
     c,

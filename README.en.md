@@ -74,7 +74,7 @@ mediacrawl crawl --platform tiktok --type creator --creators "https://www.tiktok
 
 Options: `--keywords` `--ids` `--creators` (comma-separated IDs or URLs), `--max-items 50`, `--sort latest`, `--comments`, `--sub-comments`, `--max-comments 20`, `--media`, `--save json|jsonl|csv|sqlite`, `--out ./data`, `--sleep 2-5`, `--config crawl.yaml`, `--quiet`. Run `mediacrawl crawl --help` for details.
 
-- **Resumable**: progress lives in `<out>/.crawl-state-<platform>-<type>.json`; re-run the same command and saved posts/comments are skipped.
+- **Resumable**: progress lives in `<out>/.crawl-state-<platform>-<type>.json` — saved post/comment/creator ids plus, per task (`search:camping`, `creator:u9`), the paging cursor and whether it finished. After an interruption the same command skips finished keywords and resumes the unfinished ones from the saved cursor instead of page 1; cursors are written as soon as they arrive. A state file from a run that finished is only used as a dedupe set, so keywords are queried again.
 - **Stops on risk control**: on expired login or captcha the job stops immediately with a clear message instead of hammering the platform.
 - **Config files**: any option can come from YAML/JSON; command-line flags win.
 
@@ -84,6 +84,12 @@ Options: `--keywords` `--ids` `--creators` (comma-separated IDs or URLs), `--max
 mediacrawl wordcloud --in ./data/xhs/search_comment_2026-11-01.jsonl --out cloud.png
 mediacrawl ui --port 8080        # http://127.0.0.1:8080
 ```
+
+First run creates an `admin` account — the password comes from `OMC_ADMIN_PASSWORD`, otherwise one is generated and printed in the terminal — and the page requires a login before anything else.
+
+The left column signs you in: pick a platform, scan the QR code (or paste a cookie), and switch between saved accounts; each user's signed-in state lives in their own `<out>/users/<name>/.catbus/`. Collected posts stream into the preview column as cards that open a detail drawer (cover, title, body, author, likes / comments / collects, link to the original post) instead of jumping straight out. The **Interact** panel posts a comment or sends a DM: comment covers Douyin and Bilibili, DMs cover Douyin, Xiaohongshu, TikTok, Xianyu, Taobao and JD (`mediacrawl platforms <platform>` is the source of truth); every send asks for confirmation, is throttled to one action per 3s per platform + account (`MEDIACRAWL_ACTION_INTERVAL_MS`, otherwise `TOO_FAST`), caps text at 500 characters and never retries. The server listens on 127.0.0.1 only.
+
+Multi-user: each account's data goes to `<out>/users/<name>/` with a per-user login state underneath, users cannot see each other, and an admin sees every job and file and can create, delete and re-role users from the page (the last admin is protected). Users live in `<OMC_HOME|~/.openmediacrawl>/users.json` as scrypt hashes; sessions are kept in memory, so a restart means logging in again. See [docs/guide/users.md](docs/guide/users.md).
 
 <p align="center"><img src="docs/assets/wordcloud-demo.png" width="80%" alt="word cloud example"></p>
 

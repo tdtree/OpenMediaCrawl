@@ -59,6 +59,8 @@ export interface Comment {
   author: UserRef | null
   text: string
   created_at: string | null
+  /** 平台展示的 IP 属地（如「辽宁」）；平台不给或没采到就是 null。 */
+  province?: string | null
   stats: { likes: number | null; replies: number | null }
 }
 

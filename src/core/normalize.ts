@@ -190,6 +190,7 @@ export function comment(v: Input<Comment, 'id' | 'item_id' | 'text'>, raw?: unkn
       author: v.author ?? null,
       text: v.text,
       created_at: v.created_at ?? null,
+      ...(v.province ? { province: v.province } : {}),
       stats: { likes: null, replies: null, ...v.stats },
     },
     raw,

@@ -75,6 +75,9 @@ export async function runOpenMediaCommand(argv: string[]): Promise<number> {
     if (command === 'ui') {
       const handle = await startUiServer({ port: Number(flags.port ?? positionals[0] ?? 8080), out: String(flags.out ?? DEFAULT_CRAWL_OPTIONS.out) })
       process.stderr.write(`OpenMediaCrawl UI: http://${handle.host}:${handle.port}\n`)
+      if (handle.bootstrap) {
+        process.stderr.write(`\n首次启动，已创建管理员 ${handle.bootstrap.username} / ${handle.bootstrap.password}\n登录后可在页面里改密码或新建用户；用户数据各自独立，admin 能看到全部。\n\n`)
+      }
       await new Promise<void>((resolve) => handle.server.once('close', resolve))
       return 0
     }

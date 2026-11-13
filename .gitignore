@@ -26,3 +26,9 @@ docs/roadmap.md
 
 # docker compose 的下载目录
 downloads/
+
+# 本地运行数据（含登录态 Cookie）与调试产物，绝不入库
+data/
+var/
+*.bak
+.crawl-state-*

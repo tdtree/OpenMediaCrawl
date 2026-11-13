@@ -7,6 +7,7 @@
 | 文档 | 内容 |
 |---|---|
 | [guide/quick-start.md](guide/quick-start.md) | 快速上手：安装、`doctor`、登录、第一条查询、分页、导出 jsonl |
+| [guide/users.md](guide/users.md) | 多用户与登录：`users.json`、首次启动的管理员、`omc_session` 会话、按用户隔离的数据目录、admin 能力与安全边界 |
 | [guide/login.md](guide/login.md) | 登录：扫码 / 短信 / 账密 / cookie，从 DevTools 复制 cookie，抖音和 TikTok 的会话 JSON，多账号，子站点 `--scope`，登出 |
 | [guide/output.md](guide/output.md) | 输出：信封、json / jsonl、`--raw`、归一化类型、分页与游标、退出码与错误处理（含 jq 示例） |
 | [guide/configuration.md](guide/configuration.md) | 配置：`config.toml`、代理优先级、超时、`CATBUS_HOME`、数据目录结构 |
