@@ -22,6 +22,12 @@ export const reach: View = {
 .reach-tpl input{flex:1 1 180px;min-width:120px}
 .reach-camp-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s1) var(--s3)}
 .reach-camp-meta .hint{margin:0;flex:1 1 260px;min-width:0}
+.reach-add{margin:0 0 var(--s3);border:1px dashed var(--line);border-radius:8px;padding:var(--s2) var(--s3)}
+.reach-add>summary{cursor:pointer;font-size:var(--fs-sm);color:var(--muted)}
+.reach-add-body{display:grid;grid-template-columns:160px minmax(0,1.4fr) minmax(0,.8fr) auto;gap:var(--s2);align-items:end;margin-top:var(--s2)}
+.reach-add-body .field{gap:0}
+@media(max-width:900px){.reach-add-body{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.reach-add-body{grid-template-columns:1fr}}
 .reach-form{display:flex;flex-direction:column;gap:var(--s3);margin-top:var(--s3)}
 .reach-pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:var(--s2) var(--s3);margin:var(--s2) 0 0;min-height:96px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:var(--fs-xs);line-height:1.7;color:var(--fg)}
 .tbl tbody tr.reach-logrow:hover td{background:transparent}
@@ -120,10 +126,20 @@ export const reach: View = {
       </div>
       <div class="empty" id="reachCandEmpty" hidden>
         <b>候选池还是空的</b>
-        <span>去采集页，在评论上点「加候选」；回复候选会记下那条评论，私信候选会记下评论作者。</span>
+        <span>去采集页，在评论上点「加候选」；也可以在下面手动加自己的小号做测试。</span>
         <div><button class="btn ghost sm" id="reachGoCrawl" type="button">去采集页</button></div>
       </div>
       <p class="hint" id="reachCandMsg" hidden role="status" aria-live="polite"></p>
+      <details class="reach-add" id="reachAddBox">
+        <summary>手动添加测试号</summary>
+        <div class="reach-add-body">
+          <label class="field"><span>平台</span><select id="reachAddPlatform"></select></label>
+          <label class="field"><span>用户 UID / sec_uid / 主页链接</span><input id="reachAddTarget" autocomplete="off" placeholder="https://www.douyin.com/user/MS4…"></label>
+          <label class="field"><span>备注（可选）</span><input id="reachAddName" autocomplete="off" placeholder="小号 / 测试号…"></label>
+          <button class="ghost" id="reachAddBtn" type="button">加入私信候选</button>
+        </div>
+        <p class="hint">加进来的是私信候选，不绑定作品；群发前先给自己小号发一条，确认能收到再放量。</p>
+      </details>
     </div>
 
     <div class="card">
@@ -867,11 +883,39 @@ function reachRenderPlatforms(){
   if($('#reachActTargetLabel'))$('#reachActTargetLabel').textContent=kind==='comment'?'作品 ID / 链接':'对方用户 ID / 主页';
 }
 
+function reachRenderAddPlatforms(){
+  var sel=$('#reachAddPlatform');if(!sel)return;
+  var list=(reachActMap&&reachActMap.dm)||[],keep=sel.value,html='',i;
+  for(i=0;i<list.length;i++)html+='<option value="'+esc(list[i])+'">'+esc(list[i])+'</option>';
+  sel.innerHTML=html||'<option value="">（先登录账号）</option>';
+  if(keep){for(i=0;i<sel.options.length;i++)if(sel.options[i].value===keep){sel.selectedIndex=i;break}}
+}
+
+async function reachAddManual(){
+  var platform=$('#reachAddPlatform').value;
+  var target=$('#reachAddTarget').value.trim();
+  var name=$('#reachAddName').value.trim();
+  var msg=$('#reachCandMsg');
+  if(!platform){reachShow(msg,'先选平台；没有可选项时先去「账号与设置」登录账号。');return}
+  if(!target){reachShow(msg,'填用户 UID、sec_uid 或主页链接。');return}
+  var btn=$('#reachAddBtn');
+  if(btn)btn.disabled=true;
+  try{
+    var r=await post('/api/candidates',{type:'dm',platform:platform,itemId:'manual',userId:target,userName:name||undefined,note:'手动添加'});
+    reachShow(msg,r.added?'已加入私信候选：'+target:'这个号已经在候选池里了');
+    toast(r.added?'已加入候选池':'已在候选池中',r.added?'ok':'');
+    $('#reachAddTarget').value='';
+    await reachLoadCandidates();
+  }catch(e){reachShow(msg,'加入失败：'+e.message)}
+  if(btn)btn.disabled=false;
+}
+
 async function reachLoadActionPlatforms(){
   try{
     var map=await api('/api/actions/platforms');
     reachActMap={comment:(map&&map.comment)||[],dm:(map&&map.dm)||[]};
     reachRenderPlatforms();
+    reachRenderAddPlatforms();
   }catch(e){
     reachShow($('#reachActMsg'),'可选平台读取失败：'+e.message);
   }
@@ -1220,6 +1264,7 @@ async function reachChatRefresh(){
 
 /* ---------------------------------------------------------------- 绑定与注册 */
 $('#reachCampForm').onsubmit=reachStartCampaign;
+if($('#reachAddBtn'))$('#reachAddBtn').onclick=reachAddManual;
 if($('#reachTplPick'))$('#reachTplPick').onchange=reachApplyTpl;
 if($('#reachTplSave'))$('#reachTplSave').onclick=reachSaveTpl;
 if($('#reachTplDel'))$('#reachTplDel').onclick=reachDeleteTpl;

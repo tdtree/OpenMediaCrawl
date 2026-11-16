@@ -530,6 +530,19 @@ describe('web UI', () => {
       })).json() as { added: number; skipped: number }
       expect(bulk).toMatchObject({ added: 2, skipped: 0 })
 
+      // 手动加自己的小号做收信测试：不绑定作品，itemId 用 manual
+      const manual = await (await fetch(`${base}/api/candidates`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'manual', userId: 'https://www.douyin.com/user/MS4test', userName: '小号', note: '手动添加' }),
+      })).json() as { added: boolean; candidate: { userId: string; note: string } }
+      expect(manual.added).toBe(true)
+      expect(manual.candidate).toMatchObject({ userId: 'https://www.douyin.com/user/MS4test', note: '手动添加' })
+      const manualAgain = await (await fetch(`${base}/api/candidates`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'manual', userId: 'https://www.douyin.com/user/MS4test' }),
+      })).json() as { added: boolean }
+      expect(manualAgain.added).toBe(false)
+
       // 群发话术：存多套、按 id 删
       const tpl0 = await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json() as { items: unknown[] }
       expect(tpl0.items).toEqual([])
