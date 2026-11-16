@@ -25,6 +25,7 @@
 - 控制台「每视频评论上限」默认 0（不限）导致热门视频（上万条评论）看起来卡死：默认改为 20，`0` 仍然表示全量；任务日志会显示「拉取评论 …（最多 N 条）」
 - 采集页提交后没反馈：现在轮询任务日志，表单下方实时显示「搜索 / 拉取评论 / 新增 N 条」，结束自动刷新已采数据
 - 登录失败文案写死「3 分钟」，抖音实际是 5 分钟；改为「有效期内」
+- **Docker Web 镜像漏拷 `static/`**：抖音扫码登录报 `ENOENT: /app/static/douyin/challenge_profile.json`。`Dockerfile.web` 补 `COPY static static` + `COPY assets assets`；启动时缺文件会打警告，`doctor` 增加 `static` 检查项
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

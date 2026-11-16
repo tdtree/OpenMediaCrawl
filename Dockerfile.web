@@ -37,6 +37,10 @@ WORKDIR /app
 COPY --from=build /src/package.json ./
 COPY --from=build /src/node_modules node_modules
 COPY --from=build /src/dist dist
+# 平台签名/风控脚本：抖音登录要用 static/douyin/challenge_profile.json，
+# 少了它会在容器里报 ENOENT: /app/static/douyin/challenge_profile.json
+COPY --from=build /src/static static
+COPY --from=build /src/assets assets
 COPY --from=build /src/packages packages
 
 RUN mkdir -p /data/output && chmod 700 /data

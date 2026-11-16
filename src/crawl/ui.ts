@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { isoNow } from '../core/fsutil.js'
@@ -28,6 +28,7 @@ import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from
 import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, usersFilePath, verifyUser, type Role, type UserStatus } from './users.js'
 import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, restoreSessions, sessionCookie } from './sessions.js'
 import type { ContentStore } from './shared/types.js'
+import { staticFile } from '../core/paths.js'
 import { PLATFORMS, findPlatform } from '../platforms/index.js'
 
 const STAR = '⭐ If OpenMediaCrawl helped you, please star https://github.com/Tommyapi/OpenMediaCrawl — donations: see README "Support".'
@@ -206,6 +207,12 @@ async function userActivity(base: string, username: string, days: number): Promi
 export async function startUiServer(options: { port?: number; host?: string; out?: string; clientFactory?: (platform: CrawlPlatform, extra: { sort?: string; env?: NodeJS.ProcessEnv }) => CrawlPlatformClient } = {}): Promise<UiHandle> {
   const host = options.host ?? '127.0.0.1'
   const base = resolve(options.out ?? './data')
+  // 容器镜像自检：Dockerfile 漏拷 static/ 时，抖音扫码登录会报
+  // ENOENT: /app/static/douyin/challenge_profile.json。启动时先说清楚，别等用户去点登录。
+  const challengeFile = staticFile('douyin', 'challenge_profile.json')
+  if (!existsSync(challengeFile)) {
+    process.stderr.write(`[omc] 警告：缺少 ${challengeFile}；抖音扫码登录/采集会失败。容器请重建镜像（Dockerfile 需要 COPY static/），或把仓库的 static 目录挂到 /app/static。\n`)
+  }
   // 会话落盘：进程/容器重启后原来的 cookie 仍然有效，不用重新登录。
   restoreSessions(join(dirname(usersFilePath()), 'sessions.json'))
   const jobs = new Map<string, Job>()

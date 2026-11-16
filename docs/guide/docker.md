@@ -94,6 +94,17 @@ docker run -d --name omc   -p 8080:8080   -v omc-data:/data   -e OMC_ADMIN_PASSW
 - 数据都在卷 `/data`：`/data/omc/users.json`（账号与审核状态）+ `/data/output/users/<用户名>/`（作品、评论、线索、发送记录、登录态）。备份这个卷即可整体迁移。
 - 镜像内监听 `0.0.0.0:8080`；`EXPOSE 8080` 已声明，健康检查每 30 秒打一次 `/`。
 - 镜像不含京东验证码 / OCR 模型（这两个平台在 Web 版里会报缺模型）；需要这些能力请用 CLI 镜像。
+- 镜像必须带 `static/`（平台签名脚本与抖音风控 profile）。`Dockerfile.web` 已 `COPY static static`；
+  老镜像漏了这一层时，**抖音扫码登录会报** `ENOENT: no such file or directory, open '/app/static/douyin/challenge_profile.json'`。
+  修法二选一：
+  ```bash
+  # ① 重新构建本地镜像（compose）
+  docker compose build web && docker compose up -d web
+  # ② 临时挂载仓库里的 static（不用重建镜像）
+  docker run ... -v "$PWD/static:/app/static:ro" ghcr.io/tdtree/openmediacrawl:latest
+  ```
+  启动时如果缺文件，容器日志里会有一行 `[omc] 警告：缺少 .../static/douyin/challenge_profile.json`；
+  `mediacrawl doctor` 也新增了 `static` 检查项。
 - 想用 compose：`docker compose up -d web`（服务名 `web`，同样挂 `omc-data` 卷）。
 
 ### 局域网访问

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import vm from 'node:vm'
 import { ensureDir, writeFileAtomic } from '../../core/fsutil.js'
-import { catbusHome, packageJson } from '../../core/paths.js'
+import { catbusHome, packageJson, staticFile } from '../../core/paths.js'
 import { createContext } from '../../core/vm.js'
 
 export interface Check {
@@ -84,6 +84,22 @@ export async function doctor(): Promise<Check[]> {
       const got = vm.runInContext(`require('node:crypto').createHash('md5').update('catbus').digest('hex')`, createContext())
       if (got !== expected) throw new Error(`签名 vm 的结果不对：${got}`)
       return 'node:vm + require 正常'
+    }),
+
+    await check('static', () => {
+      // 自定义镜像最容易漏掉 static/（Dockerfile.web 曾经就漏了），
+      // 少了这些文件抖音登录会直接报 ENOENT，采集也会拿不到签名脚本。
+      const required = [
+        ['douyin', 'challenge_profile.json'],
+        ['douyin', 'mstoken_profile.json'],
+        ['tiktok', 'Tiktok_Request.json'],
+        ['x', 'transaction_l1.json'],
+      ] as const
+      const missing = required.filter(([platform, file]) => {
+        try { return readFileSync(staticFile(platform, file)).length === 0 } catch { return true }
+      })
+      if (missing.length) throw new Error(`缺少静态文件：${missing.map(([p, f]) => `static/${p}/${f}`).join('、')}（容器镜像要 COPY static/）`)
+      return `${required.length} 个关键静态文件可读`
     }),
 
     await check('http', async () => {
