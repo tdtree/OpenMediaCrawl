@@ -40,6 +40,7 @@
 - 抖音私信/写操作缺少 `bd-ticket-guard` 私钥时，报错改为「Cookie 登录不会生成」并带扫码提示；控制台在失败信息后直接给「去账号页扫码登录」按钮，群发中断时同样提示；补一条本地拦截测试
 - Web 镜像（`OMC_WEB_IMAGE=1`）缺验证码模型时 `doctor` 显示「未安装模型」但不再判失败；CLI 镜像仍按故障处理
 - 控制台 UI 规范审查收尾：18 处状态提示补 `role=status` / `aria-live`、话术名称补 `aria-label`、二维码图补 `width/height`、非登录输入框关闭自动填充、文本框占位符统一以 `…` 结尾；群发设置重排为「类型 + 间隔」一行、文案 3 行，1440 宽表单高度 443→312px，390 宽无横向溢出
+- 账号页「粘贴 Cookie」拆成 Cookie / ts_sign / ticket / client_cert / 私钥 五个输入：只填 Cookie 仍只能采集，把 localStorage 的 `ec_privateKey` 填进私钥即可补写权限，前端自动组装成 JSON 提交；也支持直接粘完整 JSON
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

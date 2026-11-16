@@ -162,6 +162,34 @@ catbus douyin auth login --method cookie --cookie @dy.json
 
 **已知问题**：目前即使凭证齐全，抖音的发布仍返回空响应（上游同样失败），点赞在缺设备素材时还会导致登录态被踢。详见 [抖音的已知限制](../platforms/douyin.md#已知限制)。
 
+#### 不想重扫：从已登录浏览器取私钥
+
+私钥不是扫码接口下发的，而是网页登录时由 security-sdk 在本地生成，存在浏览器的 localStorage 里。账号在某个浏览器里还登着，就能把私钥和 ts_sign 取出来，补进凭证，不用再扫一次：
+
+1. 用登录着该账号的浏览器打开 douyin.com，F12 → Console，执行：
+
+```js
+(() => {
+  const ls = (k) => JSON.parse(localStorage.getItem(k) || '{}');
+  const crypt = ls('security-sdk/s_sdk_crypt_sdk');                  // ec_privateKey
+  const sign = ls('security-sdk/s_sdk_sign_data_key/web_protect');   // ts_sign
+  const raw = (document.cookie.match(/(?:^|;\s*)bd_ticket_guard_server_data=([^;]+)/) || [])[1];
+  const server = raw ? JSON.parse(atob(decodeURIComponent(raw))) : {};
+  console.log(JSON.stringify({ private_key: crypt.ec_privateKey, ts_sign: sign.ts_sign || server.ts_sign, ticket: server.ticket, client_cert: server.client_cert }, null, 2));
+})()
+```
+
+2. 账号页「粘贴 Cookie」里有四块输入：Cookie、ts_sign、ticket、client_cert、私钥 private_key。
+   把 Network 里复制的完整 Cookie 头粘到 Cookie，`ec_privateKey` 整段粘到私钥，其余按输出填；
+   也可以把完整 JSON 直接粘到 Cookie 框（只粘 JSON 时其它输入框留空）。
+3. 点「用 Cookie 登录」。CLI 也可以用 `--cookie @dy.json`，JSON 形如 `{"cookie":"...","private_key":"...","ts_sign":"...","ticket":"...","client_cert":"..."}`。
+
+说明：
+
+- `bd_ticket_guard_server_data` 若是 HttpOnly，`document.cookie` 读不到；此时从登录响应头里找同名的 base64 值解码，或在 Network 里搜 `ticket` / `client_cert`。
+- `ec_privateKey` 与 `ts_sign` 必须来自**同一次登录**；换过登录或清过站点数据就失效。
+- 这两个值是账号凭证，别贴给第三方工具。
+
 ### TikTok：导入浏览器会话 JSON
 
 TikTok 只能导入 cookie。只导入 Cookie 字符串时，缺的设备数据会在本地补齐，**只读命令可以正常使用**；但点赞、收藏、评论、发布、私信、直播发言等写操作需要浏览器 security-sdk 的 ticket-guard 数据，catbus 在本地拦下并报 `AUTH_REQUIRED`，提示用会话 JSON 重新登录。

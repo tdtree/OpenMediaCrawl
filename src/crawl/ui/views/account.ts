@@ -22,6 +22,15 @@ const HTML = String.raw`
         <label class="field" style="margin-top:8px"><span>Cookie</span>
           <textarea id="accountCookie" rows="3" placeholder="name=value; name2=value2…"></textarea>
         </label>
+        <div class="grid3" style="margin-top:8px">
+          <label class="field"><span>ts_sign（可选）</span><input id="accountTsSign" autocomplete="off" placeholder="ts.2.…"></label>
+          <label class="field"><span>ticket（可选）</span><input id="accountTicket" autocomplete="off" placeholder="登录响应里的 ticket…"></label>
+          <label class="field"><span>client_cert（可选）</span><input id="accountClientCert" autocomplete="off" placeholder="pub.…"></label>
+        </div>
+        <label class="field" style="margin-top:8px"><span>私钥 private_key（发私信 / 评论必填）</span>
+          <textarea id="accountPrivateKey" rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----…"></textarea>
+        </label>
+        <p class="hint">只填 Cookie 只能采集。要发私信 / 评论 / 发布，把浏览器 localStorage 里 <code>security-sdk/s_sdk_crypt_sdk</code> 的 <code>ec_privateKey</code> 粘到私钥，再把同一次登录的 ts_sign / ticket / client_cert 填上；也可以直接粘完整 JSON。取法见 docs/guide/login.md。</p>
         <div class="row" style="margin-top:8px">
           <button class="ghost" id="accountCookieBtn" type="button">用 Cookie 登录</button>
           <span class="tiny" id="accountCookieMsg" role="status" aria-live="polite"></span>
@@ -842,8 +851,29 @@ $('#accountCookieBtn').onclick=function(){
   if(!v){$('#accountCookieMsg').textContent='先粘贴 Cookie';return}
   var p=$('#accountPlatform').value;
   if(!p){$('#accountCookieMsg').textContent='先选平台';return}
+  var extra={};
+  var pk=($('#accountPrivateKey')?$('#accountPrivateKey').value:'').trim();
+  var ts=($('#accountTsSign')?$('#accountTsSign').value:'').trim();
+  var tk=($('#accountTicket')?$('#accountTicket').value:'').trim();
+  var cc=($('#accountClientCert')?$('#accountClientCert').value:'').trim();
+  if(pk)extra.private_key=pk;
+  if(ts)extra.ts_sign=ts;
+  if(tk)extra.ticket=tk;
+  if(cc)extra.client_cert=cc;
+  var payload=v;
+  if(Object.keys(extra).length){
+    if(v.charAt(0)==='{'){
+      try{
+        var obj=JSON.parse(v);
+        for(var k in extra)if(!obj[k])obj[k]=extra[k];
+        payload=JSON.stringify(obj);
+      }catch(e){$('#accountCookieMsg').textContent='Cookie 里的 JSON 解析失败：'+e.message;return}
+    }else{
+      payload=JSON.stringify(Object.assign({cookie:v},extra));
+    }
+  }
   $('#accountCookieMsg').textContent='';
-  accountStartLogin({platform:p,method:'cookie',cookie:v},this);
+  accountStartLogin({platform:p,method:'cookie',cookie:payload},this);
 };
 
 $('#accountHealthBtn').onclick=function(){accountHealth(this)};
