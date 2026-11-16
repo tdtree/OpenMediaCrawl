@@ -569,6 +569,8 @@ describe('douyin 对拍：补齐的命令流程', () => {
       .rejects.toThrow(/risk control/)
     await expect(im.decodeImResponse(mk('server error', 500, 'text/plain'), '发送私信'))
       .rejects.toThrow(/HTTP 500.*server error/s)
+    await expect(im.decodeImResponse(mk('{"decision": "KICK"}'), '发送私信'))
+      .rejects.toMatchObject({ code: 'RISK_CONTROL', message: expect.stringContaining('KICK') })
     // 20 字节的坏 protobuf：不能再只报 index out of range
     const bad = Buffer.alloc(20, 0x61)
     bad[0] = 0x1a

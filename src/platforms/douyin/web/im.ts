@@ -121,6 +121,14 @@ export async function decodeImResponse(res: HttpResponse, what: string): Promise
   const printable = /^[\x09\x0a\x0d\x20-\x7e\u4e00-\u9fa5]*$/.test(text)
   if (!res.ok || /json|text/i.test(ct)) {
     const snippet = printable ? text.trim().slice(0, 300) : ''
+    let decision = ''
+    try { decision = String((JSON.parse(text) as { decision?: unknown }).decision ?? '') } catch {}
+    if (decision === 'KICK') {
+      throw new CatbusError('RISK_CONTROL', '抖音风控拒绝了这次私信（decision=KICK）：当前会话被判定为风险/自动化', {
+        hint: '先在浏览器里手动给同一个人发一条，或重新扫码登录后再试；频繁失败时降低频率、换号',
+        detail: { status: res.status, contentType: ct, logid, size: buf.length },
+      })
+    }
     throw new CatbusError('UPSTREAM', `${what}失败：HTTP ${res.status}${snippet ? ` ${snippet}` : '（空响应）'}`, {
       detail: { status: res.status, contentType: ct, logid, size: buf.length },
     })
@@ -137,24 +145,45 @@ export async function decodeImResponse(res: HttpResponse, what: string): Promise
 
 /** 建立（或取回）与某个用户的单聊会话（上游 create_conversation）。 */
 export async function createConversation(d: Douyin, toUid: string): Promise<Conversation> {
+  if (!/^\d{5,}$/.test(toUid.trim())) throw new CatbusError('USAGE', `无法识别的用户 UID：${toUid}`, { hint: '私信会话的 participants 必须是数字 UID；主页链接/抖音号应先解析成 uid' })
+  toUid = toUid.trim()
   const myUid = await d.uid()
-  const req = normalRequest(609)
-  req.body = { create_conversation_v2_body: { conversation_type: 1, participants: [toUid, myUid] } }
   const prv = d.privateKey
   if (!prv) throw new CatbusError('AUTH_REQUIRED', '当前账号缺少 bd-ticket-guard 私钥，建不了私信会话（Cookie 登录不会生成）', { hint: '在「账号与设置」用同一账号扫码登录后再发' })
-  req.reuqest_sign = ecdsaSign(compactJson({ sign_data: `avatar_url=&idempotent_id=&name=&participants=${toUid},${myUid}`, certType: 'cookie', scene: 'web_protect' }), prv)
-  const res = await d.request({ method: 'POST', url: `${IMAPI}/v2/conversation/create`, headers: protoHeaders().list(), body: proto.encode('Request', 'Request', req) })
-  const body = await decodeImResponse(res, '创建私信会话')
-  const conv = body.body?.create_conversation_v2_body?.conversation_info_list?.[0]
-  if (!conv) {
-    const desc = String(body.error_desc || body.message || '')
-    const mismatch = /session length/i.test(desc)
-    throw new CatbusError('UPSTREAM', `创建私信会话失败：${desc}${mismatch ? '（ticket 与 cookie 不是同一次登录，或 ticket 被截断：请重新扫码，或重新抓取 dy.json 后导入）' : ''}`, {
-      hint: mismatch ? '在「账号与设置」重新扫码登录，或重新抓取 dy.json 再导入；Cookie 单独登录不会带 ticket' : undefined,
-      detail: { cmd: body.cmd, message: body.message },
-    })
+  const body = { create_conversation_v2_body: { conversation_type: 1, participants: [toUid, myUid] } }
+  const post = async (authType: number, signed: boolean): Promise<Conversation> => {
+    const req = normalRequest(609)
+    req.auth_type = authType
+    req.body = body
+    if (signed) req.reuqest_sign = ecdsaSign(compactJson({ sign_data: `avatar_url=&idempotent_id=&name=&participants=${toUid},${myUid}`, certType: 'cookie', scene: 'web_protect' }), prv)
+    const res = await d.request({ method: 'POST', url: `${IMAPI}/v2/conversation/create`, headers: protoHeaders().list(), body: proto.encode('Request', 'Request', req) })
+    const parsed = await decodeImResponse(res, '创建私信会话')
+    const conv = parsed.body?.create_conversation_v2_body?.conversation_info_list?.[0]
+    if (!conv) {
+      const desc = String(parsed.error_desc || parsed.message || '')
+      throw new CatbusError('UPSTREAM', `创建私信会话失败：${desc}`, { detail: { cmd: parsed.cmd, message: parsed.message, authType } })
+    }
+    return { conversationId: conv.conversation_id, shortId: String(conv.conversation_short_id), ticket: conv.ticket }
   }
-  return { conversationId: conv.conversation_id, shortId: String(conv.conversation_short_id), ticket: conv.ticket }
+  try {
+    return await post(4, true)
+  } catch (error) {
+    // 新版 IM 的真实 create 用 auth_type=1、顶层不签名；老包是 4 + reuqest_sign。
+    // 老格式被服务端判 session length 时，按新格式重试一次。
+    if (!(error instanceof CatbusError) || !/session length/i.test(error.message)) throw error
+    try {
+      return await post(1, false)
+    } catch (second) {
+      if (second instanceof CatbusError) {
+        throw new CatbusError(second.code, `${second.message}（已按 auth_type=1 无签名重试仍失败）`, {
+          hint: '重新扫码登录，或重新抓取 dy.json 导入；仍失败说明当前账号被服务端限制建会话',
+          detail: second.detail,
+          cause: second,
+        })
+      }
+      throw second
+    }
+  }
 }
 
 /** 私信发送前要取的短时身份安全 token，缓存 240 秒（上游 get_identity_security_token）。 */
@@ -184,38 +213,47 @@ export async function identityToken(d: Douyin, force = false): Promise<{ token: 
 
 /** 发一条已经构造好的私信（上游 _send_message_raw），返回 client_message_id。 */
 export async function sendMessage(d: Douyin, conv: Conversation, messageType: number, content: unknown): Promise<string> {
-  const h = protoHeaders()
-  await d.withBd(h, '/v1/message/send')
-  const identity = await identityToken(d)
-  const clientMessageId = rand.uuid4()
-  const req = normalRequest(100)
-  req.body = {
-    send_message_body: {
-      conversation_id: conv.conversationId,
-      conversation_type: 1,
-      conversation_short_id: conv.shortId,
-      content: typeof content === 'string' ? content : compactJson(content),
-      ext: [
-        { key: 's:mentioned_users', value: '' },
-        { key: 's:client_message_id', value: clientMessageId },
-        { key: 's:stime', value: `${rand.now()}.${String(Math.floor(rand.random() * 100000)).padStart(5, '0')}` },
-      ],
-      message_type: messageType,
-      ticket: conv.ticket,
-      client_message_id: clientMessageId,
-    },
+  const attempt = async (forceToken: boolean): Promise<string> => {
+    const h = protoHeaders()
+    await d.withBd(h, '/v1/message/send')
+    const identity = await identityToken(d, forceToken)
+    const clientMessageId = rand.uuid4()
+    const req = normalRequest(100)
+    req.body = {
+      send_message_body: {
+        conversation_id: conv.conversationId,
+        conversation_type: 1,
+        conversation_short_id: conv.shortId,
+        content: typeof content === 'string' ? content : compactJson(content),
+        ext: [
+          { key: 's:mentioned_users', value: '' },
+          { key: 's:client_message_id', value: clientMessageId },
+          { key: 's:stime', value: `${rand.now()}.${String(Math.floor(rand.random() * 100000)).padStart(5, '0')}` },
+        ],
+        message_type: messageType,
+        ticket: conv.ticket,
+        client_message_id: clientMessageId,
+      },
+    }
+    if (identity.token) req.headers.identity_security_token = compactJson({ token: identity.token })
+    if (identity.deviceId) req.headers.identity_security_device_id = identity.deviceId
+    req.headers.identity_security_aid = ''
+    const p = new Params().add('msToken', await d.msToken())
+    p.add('a_bogus', d.ab.sign(spliceUrl(p.pairs())))
+    const fp = d.cookie('s_v_web_id') ?? ''
+    p.add('verifyFp', fp).add('fp', fp)
+    const res = await d.request({ method: 'POST', url: `${IMAPI}/v1/message/send`, headers: h.list(), query: p.pairs(), body: proto.encode('Request', 'Request', req) })
+    const body = await decodeImResponse(res, '发送私信')
+    if (body.message !== 'OK') throw new CatbusError('UPSTREAM', `私信发送失败：${body.error_desc || body.message || ''}`, { detail: { message: body.message ?? null, error: body.error_desc ?? null } })
+    return clientMessageId
   }
-  if (identity.token) req.headers.identity_security_token = compactJson({ token: identity.token })
-  if (identity.deviceId) req.headers.identity_security_device_id = identity.deviceId
-  req.headers.identity_security_aid = ''
-  const p = new Params().add('msToken', await d.msToken())
-  p.add('a_bogus', d.ab.sign(spliceUrl(p.pairs())))
-  const fp = d.cookie('s_v_web_id') ?? ''
-  p.add('verifyFp', fp).add('fp', fp)
-  const res = await d.request({ method: 'POST', url: `${IMAPI}/v1/message/send`, headers: h.list(), query: p.pairs(), body: proto.encode('Request', 'Request', req) })
-  const body = await decodeImResponse(res, '发送私信')
-  if (body.message !== 'OK') throw new CatbusError('UPSTREAM', `私信发送失败：${body.error_desc || body.message || ''}`, { detail: { message: body.message ?? null, error: body.error_desc ?? null } })
-  return clientMessageId
+  try {
+    return await attempt(false)
+  } catch (error) {
+    // 缓存的身份 token 可能已被服务端作废：KICK 时强制刷新一次再发，仍然 KICK 才报错。
+    if (error instanceof CatbusError && error.code === 'RISK_CONTROL') return await attempt(true)
+    throw error
+  }
 }
 
 /** 文本私信的 content（上游 send_msg）。 */
