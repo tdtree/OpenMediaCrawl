@@ -1190,6 +1190,13 @@ function raiseIfBlocked(api: string, res: any): void {
   const desc = res.data?.description ?? res.message ?? ''
   if (code === 4031) throw new CatbusError('RISK_CONTROL', `${api} 返回 4031「网站存在安全风险」：${desc}`, { detail: { kind: 'blocked', code } })
   if (code === 7) throw new CatbusError('RISK_CONTROL', `${api} 访问太频繁：${desc}`, { detail: { kind: 'rate_limit', code } })
+  // 2046：抖音要求先在 App 内完成安全验证（换设备/异地登录常见），扫码流程本身没有可自动通过的步骤。
+  if (code === 2046) {
+    throw new CatbusError('RISK_CONTROL', `抖音要求先在 App 内完成安全验证：${desc || '请前往抖音 APP 完成验证后再登录'}`, {
+      hint: '打开抖音 App → 我 → 设置 → 账号与安全（安全中心 / 登录设备管理）完成验证后重新扫码；也可以直接用 Cookie 登录（从浏览器 DevTools 复制完整 Cookie）',
+      detail: { kind: 'verify', code },
+    })
+  }
   throw new CatbusError('UPSTREAM', `${api} 失败 error_code=${code} ${desc}`, { detail: { code, description: desc } })
 }
 
