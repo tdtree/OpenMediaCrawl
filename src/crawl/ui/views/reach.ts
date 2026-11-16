@@ -150,7 +150,7 @@ export const reach: View = {
         </div>
         <div class="reach-camp-meta">
           <p class="tiny" id="reachCampMeta">已选 0 / 可发 0 / 单日上限 -</p>
-          <p class="hint" id="reachCampHint">服务端会跳过今天已经发过的和超上限的，遇到风控或登录失效会自动停；上限与间隔由 admin 在「账号与设置」统一设置。</p>
+          <p class="hint" id="reachCampHint">跳过已发和超上限；风控或登录失效自动停。</p>
         </div>
         <div class="row">
           <button class="primary" id="reachCampStart" type="submit">开始群发</button>

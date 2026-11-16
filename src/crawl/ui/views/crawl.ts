@@ -73,7 +73,11 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .crawl-it-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:var(--fs-sm);line-height:1.4;word-break:break-word}
 .crawl-it-m{display:flex;flex-wrap:wrap;gap:0 var(--s2);margin-top:2px;font-size:var(--fs-xs);color:var(--muted)}
 .crawl-it[aria-current=true] .crawl-it-m{color:var(--acc-ink);opacity:.85}
-.crawl-detail{min-height:420px;max-height:min(72vh,760px);overflow:auto;overscroll-behavior:contain}
+.crawl-detail{min-height:320px;max-height:min(72vh,760px);overflow:auto;overscroll-behavior:contain}
+/* 列表为空时只留一块空态，别让右侧再重复一遍「没有作品」 */
+.crawl-md:has(#crawlList>.empty){grid-template-columns:minmax(0,1fr)}
+.crawl-md:has(#crawlList>.empty) #crawlDetail{display:none}
+.crawl-md:has(#crawlList>.empty) #crawlList{max-height:none}
 .crawl-dt-head{display:flex;gap:var(--s3);align-items:flex-start}
 .crawl-dt-t{min-width:0}
 .crawl-dt-t h3{font-size:var(--fs-lg);line-height:1.35;word-break:break-word}

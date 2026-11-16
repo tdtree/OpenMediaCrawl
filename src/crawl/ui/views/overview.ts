@@ -13,9 +13,9 @@ export const overview: View = {
 .ov-err .sub{flex:1 1 220px;min-width:0}
 
 .ov-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:var(--s4)}
-.ov-kpi{display:flex;flex-direction:column;gap:2px;min-width:0;padding:14px 16px;border-left:1px solid var(--line)}.ov-kpi:first-child{border-left:0;padding-left:0}
+.ov-kpi{display:flex;flex-direction:column;gap:2px;min-width:0;padding:16px;border-left:1px solid var(--line)}.ov-kpi:first-child{border-left:0;padding-left:0}
 .ov-kpi-label{font-size:var(--fs-xs);color:var(--muted)}
-.ov-kpi-num{font-size:30px;line-height:1.1;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.ov-kpi-num{font-size:32px;line-height:1.1;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .ov-kpi-sub{font-size:var(--fs-xs);color:var(--muted);line-height:1.35}
 .ov-kpi.is-today .ov-kpi-num{color:var(--acc-ink)}
 .ov-kpi.is-zero .ov-kpi-num{color:var(--muted)}

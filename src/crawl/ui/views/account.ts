@@ -162,7 +162,8 @@ const CSS = String.raw`
 .account-cookie>summary{list-style:none;cursor:pointer}
 .account-cookie>summary::-webkit-details-marker{display:none}
 .account-cookie>summary::marker{content:""}
-.account-danger{border-color:var(--danger)}
+.account-danger{border-color:color-mix(in srgb,var(--danger) 32%,var(--line))}
+.account-danger h3{color:var(--danger)}
 .account-tbl td{vertical-align:middle}
 .account-tbl td .row{flex-wrap:nowrap}
 .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-top:var(--s3);min-height:32px}
