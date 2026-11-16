@@ -164,17 +164,16 @@ catbus douyin auth login --method cookie --cookie @dy.json
 
 #### 一键抓取（本机 Chrome）
 
-本机装了 Chrome 时，不用手动翻 localStorage 和 Network。具体操作：
+本机装了 Chrome 时，不用手动翻 localStorage 和 Network，也不需要克隆仓库。具体操作：
 
-1. 在 Windows 上按 `Win+R`，输入 `cmd`，回车
-2. `cd /d C:\code\OpenMediaCrawl`
-3. 第一次先装依赖：`npm install`
-4. 运行：`npm run capture:douyin`
-5. 脚本会打开一个独立的 Chrome 窗口和抖音首页；点右上角「登录」→ 扫码，有二次验证按页面提示完成
-6. 抓齐 `cookie / ticket / ts_sign / client_cert / private_key` 五项后自动退出，生成 `C:\code\OpenMediaCrawl\dy.json`
-7. 回控制台：账号与设置 → 粘贴 Cookie → 「导入 dy.json」→ 确认平台 → 「用 Cookie 登录」
+1. 控制台 → 账号与设置 → 粘贴 Cookie → 点「下载 .bat」（或「复制抓取命令」到 cmd 里粘贴）
+2. 双击 `capture-douyin.bat`；它会把零依赖抓取脚本下载到 `%TEMP%\omc-dy-capture`，然后用系统里的 Node 运行
+3. 只需要两个前提：Windows 有 Chrome、有 Node.js 22+（没有会提示并打开 nodejs.org）
+4. 脚本会打开一个独立的 Chrome 窗口和抖音首页；点右上角「登录」→ 扫码，有二次验证按页面提示完成
+5. 抓齐 `cookie / ticket / ts_sign / client_cert / private_key` 五项后自动退出，生成 `C:\Users\<你>\dy.json`
+6. 回控制台：点「导入 dy.json」→ 选这个文件 → 确认平台 → 「用 Cookie 登录」
 
-控制台里也提供「复制抓取命令」和「下载 .bat」两个按钮：复制后到 cmd 里粘贴即可；`.bat` 双击运行，效果相同。
+开发机有仓库时也可以直接 `npm run capture:douyin`（puppeteer-core 版，产物同样在仓库根目录）。
 
 - `DY_FRESH=1 npm run capture:douyin`：清掉旧登录态重新扫码
 - `CHROME_PATH=...`、`DY_OUT=...`、`DY_TIMEOUT_MS=...` 可覆盖默认

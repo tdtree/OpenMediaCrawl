@@ -543,6 +543,17 @@ describe('web UI', () => {
       })).json() as { added: boolean }
       expect(manualAgain.added).toBe(false)
 
+      // 本机抓取工具：公开下载，bat 里带当前控制台的地址
+      const tool = await fetch(`${base}/api/capture/dy-capture.mjs`)
+      expect(tool.status).toBe(200)
+      expect(await tool.text()).toContain('dy-capture')
+
+      const bat = await fetch(`${base}/api/capture/capture-douyin.bat`)
+      expect(bat.status).toBe(200)
+      const batText = await bat.text()
+      expect(batText).toContain('/api/capture/dy-capture.mjs')
+      expect(batText).toContain('where node')
+
       // 群发话术：存多套、按 id 删
       const tpl0 = await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json() as { items: unknown[] }
       expect(tpl0.items).toEqual([])

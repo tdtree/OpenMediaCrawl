@@ -39,8 +39,8 @@ const HTML = String.raw`
           <input id="accountImportFile" type="file" accept=".json,application/json" hidden>
           <span class="tiny" id="accountCookieMsg" role="status" aria-live="polite"></span>
         </div>
-        <p class="hint">本机抓取：Windows 的 cmd 里运行下面命令（第一次先 <code>npm install</code>），Chrome 会打开抖音，扫码后自动生成 dy.json，再点「导入 dy.json」。容器里跑不了。</p>
-        <input id="accountCaptureCmd" class="mono tiny" readonly aria-label="本机抓取命令" value="cd /d C:\code\OpenMediaCrawl && npm run capture:douyin" style="margin-top:6px">
+        <p class="hint">本机抓取不需要仓库：下载的 .bat 会自己拉取抓取脚本到临时目录，只要这台电脑有 Node.js 22+ 和 Chrome。抓完在用户目录（C:\Users\你的名字\dy.json）生成文件，导入即可；容器里跑不了。</p>
+        <input id="accountCaptureCmd" class="mono tiny" readonly aria-label="本机抓取命令" value="" style="margin-top:6px">
       </details>
       <div class="account-qr" id="accountQrBox" hidden>
         <img id="accountQrImg" alt="登录二维码" width="220" height="220" loading="lazy">
@@ -852,8 +852,12 @@ $('#accountScanBtn').onclick=function(){
   accountStartLogin({platform:p},this);
 };
 
+function accountCaptureCmdText(){
+  return 'curl -L "'+location.origin+'/api/capture/capture-douyin.bat" -o "%TEMP%\\capture-douyin.bat" && "%TEMP%\\capture-douyin.bat"';
+}
+
 $('#accountCaptureCmdBtn').onclick=async function(){
-  var cmd='cd /d C:\\code\\OpenMediaCrawl && npm run capture:douyin';
+  var cmd=$('#accountCaptureCmd')?$('#accountCaptureCmd').value:accountCaptureCmdText();
   var ok=false;
   try{ if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(cmd);ok=true} }catch(e){}
   if(!ok){
@@ -870,15 +874,10 @@ $('#accountCaptureCmdBtn').onclick=async function(){
   }
 };
 $('#accountCaptureBatBtn').onclick=function(){
-  var bat='@echo off\r\ncd /d C:\\code\\OpenMediaCrawl\r\nnpm run capture:douyin\r\npause\r\n';
-  var blob=new Blob([bat],{type:'application/octet-stream'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='capture-douyin.bat';
-  document.body.appendChild(a);a.click();document.body.removeChild(a);
-  setTimeout(function(){URL.revokeObjectURL(a.href)},1000);
-  toast('已下载 capture-douyin.bat，双击运行');
+  location.href='/api/capture/capture-douyin.bat';
+  toast('下载中，双击 capture-douyin.bat 运行');
 };
+if($('#accountCaptureCmd'))$('#accountCaptureCmd').value=accountCaptureCmdText();
 
 $('#accountImportBtn').onclick=function(){var f=$('#accountImportFile');if(f)f.click()};
 $('#accountImportFile').onchange=async function(){

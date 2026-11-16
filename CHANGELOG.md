@@ -41,7 +41,7 @@
 - Web 镜像（`OMC_WEB_IMAGE=1`）缺验证码模型时 `doctor` 显示「未安装模型」但不再判失败；CLI 镜像仍按故障处理
 - 控制台 UI 规范审查收尾：18 处状态提示补 `role=status` / `aria-live`、话术名称补 `aria-label`、二维码图补 `width/height`、非登录输入框关闭自动填充、文本框占位符统一以 `…` 结尾；群发设置重排为「类型 + 间隔」一行、文案 3 行，1440 宽表单高度 443→312px，390 宽无横向溢出
 - 账号页「粘贴 Cookie」拆成 Cookie / ts_sign / ticket / client_cert / 私钥 五个输入：只填 Cookie 仍只能采集，把 localStorage 的 `ec_privateKey` 填进私钥即可补写权限，前端自动组装成 JSON 提交；也支持直接粘完整 JSON
-- 本机一键抓取抖音凭证：`scripts/dy-capture.mjs` + `npm run capture:douyin`，打开独立 Chrome 扫码，自动抓 `cookie / ticket / ts_sign / client_cert / private_key` 生成 `dy.json`；账号页新增「导入 dy.json」自动填五个输入，另给「复制抓取命令」「下载 .bat」两个快捷按钮。抓取依赖 `puppeteer-core`，只能在有 Chrome 的本机跑，Docker 里不可用
+- 本机一键抓取抖音凭证：控制台直接下发零依赖抓取工具（`/api/capture/dy-capture.mjs` + 生成 `capture-douyin.bat`），普通用户不需要仓库或 npm，只要 Node.js 22+ 和 Chrome；扫码后自动抓 `cookie / ticket / ts_sign / client_cert / private_key` 生成用户目录下的 `dy.json`，账号页「导入 dy.json」自动填五个输入。开发机仍可用 `npm run capture:douyin`（puppeteer-core 版）
 - 触达 → 候选池支持「手动添加测试号」：填平台 + UID / sec_uid / 主页链接即可加入私信候选（不绑定作品），群发前可先给自己的小号发一条验证收信；重复添加只算一次
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效

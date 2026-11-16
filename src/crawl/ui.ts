@@ -314,6 +314,21 @@ export async function startUiServer(options: { port?: number; host?: string; out
     // ---------------------------------------------------------------- 公开
     if (req.method === 'GET' && url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', renderPage())
 
+    // 本机抓取工具：bat 无 cookie 下载，放在公开区；里面不含任何账号数据。
+    if (req.method === 'GET' && url.pathname === '/api/capture/dy-capture.mjs') {
+      const tool = await readFile(new URL('../../static/capture/dy-capture.mjs', import.meta.url), 'utf8').catch(() => null)
+      if (!tool) return json(res, { error: '抓取脚本缺失，请更新镜像' }, 404)
+      return send(res, 200, 'text/javascript; charset=utf-8', tool)
+    }
+    if (req.method === 'GET' && url.pathname === '/api/capture/capture-douyin.bat') {
+      const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim() || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http')
+      const host = req.headers.host || '127.0.0.1'
+      const toolUrl = `${proto}://${host}/api/capture/dy-capture.mjs`
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="capture-douyin.bat"' })
+      res.end(captureBat(toolUrl))
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/register') {
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
@@ -1233,6 +1248,34 @@ function describeLoginFailure(stdout: string, stderr: string, code: number | nul
 
 function json(res: ServerResponse, value: unknown, status = 200): void { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)) }
 function send(res: ServerResponse, status: number, contentType: string, value: string): void { res.writeHead(status, { 'content-type': contentType }); res.end(value) }
+
+/** 本机抓取用的 .bat：从控制台拉取零依赖脚本到临时目录，用系统 Node 运行。 */
+function captureBat(toolUrl: string): string {
+  return [
+    '@echo off',
+    'chcp 65001 >nul',
+    'setlocal',
+    'set "DIR=%TEMP%\\omc-dy-capture"',
+    'if not exist "%DIR%" mkdir "%DIR%"',
+    'echo 正在下载抓取脚本…',
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -UseBasicParsing '${toolUrl}' -OutFile '%DIR%\\dy-capture.mjs' } catch { exit 1 }"`,
+    'if errorlevel 1 (',
+    `  echo 下载失败：请确认这台电脑能打开 ${toolUrl}`,
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'where node >nul 2>nul',
+    'if errorlevel 1 (',
+    '  echo 需要先安装 Node.js 22 或更高版本：https://nodejs.org/',
+    '  start "" https://nodejs.org/',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'node "%DIR%\\dy-capture.mjs"',
+    'pause',
+    '',
+  ].join('\r\n')
+}
 function mime(ext: string): string { return ext === '.json' ? 'application/json' : ext === '.csv' ? 'text/csv; charset=utf-8' : 'application/octet-stream' }
 
 export { STAR }
