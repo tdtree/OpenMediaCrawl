@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { isoNow } from '../core/fsutil.js'
@@ -17,13 +18,16 @@ import { LeadStore, buildLeads, toCsv } from './leads.js'
 import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
 import { loadLexicon, saveLexicon, sanitizeLexicon } from './lexicon.js'
 import { appendChat, hasMessage, listChat, listThreads } from './chat.js'
-import { addFilterTerms, applyCleanup, planCleanup } from './cleanup.js'
+import { addFilterTerms, applyCleanup, applySharedCleanup, effectiveTerms, isSharedPlan, planCleanup, planCleanupFromStore, type CleanupPlan, type SharedCleanupPlan } from './cleanup.js'
+import { openContentStore } from './shared/store.js'
+import { loadSharedConfig, parseRefresh, policyFrom, sharedEnabled } from './shared/config.js'
 import { DEFAULT_SEND_CONFIG, loadSendConfig, saveSendConfig } from './send-config.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
 import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, usersFilePath, verifyUser, type Role, type UserStatus } from './users.js'
 import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, restoreSessions, sessionCookie } from './sessions.js'
+import type { ContentStore } from './shared/types.js'
 import { PLATFORMS, findPlatform } from '../platforms/index.js'
 
 const STAR = '⭐ If OpenMediaCrawl helped you, please star https://github.com/Tommyapi/OpenMediaCrawl — donations: see README "Support".'
@@ -100,9 +104,16 @@ const SESSION_MAX_AGE = 10 * 365 * 24 * 3600
 
 
 /** 扫一个用户目录，统计使用情况（给 admin 的账户面板用）。 */
-async function scanUsage(base: string, name: string): Promise<{ items: number; comments: number; leads: number; sent: number; bytes: number; authBytes: number; logins: number; lastActive: string | null }> {
+async function scanUsage(base: string, name: string, store?: ContentStore | null): Promise<{ items: number; comments: number; leads: number; sent: number; bytes: number; authBytes: number; logins: number; lastActive: string | null }> {
   const dir = join(base, 'users', name)
   const out = { items: 0, comments: 0, leads: 0, sent: 0, bytes: 0, authBytes: 0, logins: 0, lastActive: null as string | null }
+  // 共享模式：作品/评论不在用户目录里，按引用统计；此时别再叠加旧文件里的行数，否则迁移后会翻倍。
+  const refs = store ? store.listRefs(name) : []
+  const useShared = refs.length > 0
+  if (store && useShared) {
+    out.items = refs.length
+    out.comments = refs.reduce((sum, ref) => sum + store.commentCount(ref.platform, ref.itemId), 0)
+  }
   let entries
   try { entries = await readdir(dir, { recursive: true, withFileTypes: true }) } catch { return out }
   let last = 0
@@ -121,8 +132,10 @@ async function scanUsage(base: string, name: string): Promise<{ items: number; c
     out.bytes += info.size
     if (!rel.endsWith('.jsonl')) continue
     const lines = (await readFile(full, 'utf8').catch(() => '')).split('\n').filter((line) => line.trim()).length
-    if (rel.includes('comment')) out.comments += lines
-    else if (rel.includes('item')) out.items += lines
+    if (!useShared) {
+      if (rel.includes('comment')) out.comments += lines
+      else if (rel.includes('item')) out.items += lines
+    }
     if (rel === 'leads.jsonl') out.leads = lines
     if (rel === 'sent.jsonl') out.sent = lines
   }
@@ -203,6 +216,35 @@ export async function startUiServer(options: { port?: number; host?: string; out
 
   const userRoot = (username: string) => join(base, 'users', username)
   const userHome = (username: string) => join(userRoot(username), '.catbus')
+
+  /**
+   * 共享内容库：默认开（OMC_SHARED=0 关闭，退回按用户落盘）。
+   * 一个库给所有用户共用；每个用户只有自己的 refs、线索、候选池和发送记录。
+   */
+  const sharedDir = join(base, 'shared')
+  const sharedConfig = await loadSharedConfig(sharedDir)
+  const content = sharedEnabled(sharedConfig) ? openContentStore(sharedDir) : null
+  /** 用户视图 = 自己的引用 + 共享库正文/评论（旧 jsonl 仍作为兜底）。 */
+  const loadUserIndex = (username: string, platform: string) =>
+    loadIndex({ root: userRoot(username), store: content ?? undefined, user: username }, platform)
+  /** 当前登录的平台账号（写进 refs / fetch_log，只用于回查来源）。 */
+  async function currentAccount(username: string, platform: string): Promise<string | null> {
+    try {
+      const value = (await readFile(join(userHome(username), 'auth', platform, 'web', '_current'), 'utf8')).trim()
+      return value || null
+    } catch { return null }
+  }
+
+  /**
+   * 清理预览：这个用户在共享库里有引用就按共享库算（结果是隐藏掩码），
+   * 没有引用（还没迁移的老数据）就退回按文件算，行为和升级前一致。
+   */
+  async function cleanupPlanFor(username: string, days: number): Promise<CleanupPlan | SharedCleanupPlan> {
+    if (content && content.listRefs(username).length) {
+      return await planCleanupFromStore(content, username, await effectiveTerms(userRoot(username)), { days })
+    }
+    return await planCleanup(userRoot(username), { days })
+  }
 
   /** 群发参数：admin 统一设置，所有账号共用（send-config.json，和 users.json 同目录）。 */
   interface UserSettings { dailyCap: number; batchMax: number; minSeconds: number; maxSeconds: number }
@@ -444,7 +486,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const days = Math.min(3650, Math.max(1, Number(url.searchParams.get('days') ?? 30)))
       const rows: Array<{ username: string; days: number; total: number; candidates: number; bytes: number; candidateBytes: number; skipped: number; terms: number }> = []
       for (const item of await listUsers()) {
-        const plan = await planCleanup(userRoot(item.username), { days })
+        const plan = await cleanupPlanFor(item.username, days)
         rows.push({ username: item.username, days, total: plan.total, candidates: plan.candidates.length, bytes: plan.bytes, candidateBytes: plan.candidates.reduce((sum, one) => sum + one.bytes, 0), skipped: plan.skipped, terms: plan.terms.length })
       }
       const sum = (key: 'total' | 'candidates' | 'bytes' | 'candidateBytes' | 'skipped') => rows.reduce((total, row) => total + row[key], 0)
@@ -462,9 +504,11 @@ export async function startUiServer(options: { port?: number; host?: string; out
       let freedBytes = 0
       for (const item of await listUsers()) {
         if (only && item.username !== only) continue
-        const plan = await planCleanup(userRoot(item.username), { days })
+        const plan = await cleanupPlanFor(item.username, days)
         if (!plan.candidates.length) { rows.push({ username: item.username, removed: 0, freedBytes: 0 }); continue }
-        const result = await applyCleanup(plan)
+        const result = content && isSharedPlan(plan)
+          ? await applySharedCleanup(content, item.username, plan)
+          : await applyCleanup(plan)
         removed += result.removed
         freedBytes += result.freedBytes
         rows.push({ username: item.username, removed: result.removed, freedBytes: result.freedBytes })
@@ -531,7 +575,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const users = await listUsers()
       const rows = []
       for (const item of users) {
-        rows.push({ username: item.username, role: item.role, status: item.status, created_at: item.created_at, ...(await scanUsage(base, item.username)) })
+        rows.push({ username: item.username, role: item.role, status: item.status, created_at: item.created_at, ...(await scanUsage(base, item.username, content)) })
       }
       return json(res, { users: rows })
     }
@@ -588,15 +632,51 @@ export async function startUiServer(options: { port?: number; host?: string; out
     if (req.method === 'GET' && url.pathname === '/api/records') {
       const platform = String(url.searchParams.get('platform') ?? '')
       if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
-      const index = await loadIndex(root, platform)
+      const index = await loadUserIndex(user.username, platform)
       return json(res, { platform, items: index.items })
     }
     if (req.method === 'GET' && url.pathname === '/api/records/comments') {
       const platform = String(url.searchParams.get('platform') ?? '')
       const item = String(url.searchParams.get('item') ?? '')
       if (!findPlatform(platform) || !item) return json(res, { error: '需要 platform 和 item' }, 400)
-      const index = await loadIndex(root, platform)
+      const index = await loadUserIndex(user.username, platform)
       return json(res, { platform, item, comments: threadOf(index.comments.get(item) ?? []) })
+    }
+    if (req.method === 'GET' && url.pathname === '/api/media') {
+      const platform = String(url.searchParams.get('platform') ?? '')
+      const item = String(url.searchParams.get('item') ?? '')
+      const seq = Math.trunc(Number(url.searchParams.get('seq') ?? 1))
+      if (!content) return json(res, { error: '共享库未启用（OMC_SHARED=0）' }, 409)
+      if (!findPlatform(platform) || !item || !Number.isFinite(seq) || seq < 1) return json(res, { error: '需要 platform、item 和 seq' }, 400)
+      if (user.role !== 'admin' && !content.hasRef(user.username, platform, item)) return json(res, { error: '没有权限' }, 403)
+      const row = content.mediaRows(platform, item).find((one) => one.seq === seq)
+      if (!row?.sha256) return json(res, { error: '媒体还没下载', hint: '采集时勾选「下载媒体」' }, 404)
+      const blob = content.blobFile(row.sha256)
+      if (!blob) return json(res, { error: 'not found' }, 404)
+      try {
+        const info = await stat(blob.path)
+        res.writeHead(200, { 'content-type': row.mime ?? blob.mime ?? 'application/octet-stream', 'content-length': String(info.size), 'cache-control': 'private, max-age=3600' })
+        createReadStream(blob.path).pipe(res)
+      } catch { json(res, { error: 'not found' }, 404) }
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/media/list') {
+      const platform = String(url.searchParams.get('platform') ?? '')
+      const item = String(url.searchParams.get('item') ?? '')
+      if (!content) return json(res, { error: '共享库未启用（OMC_SHARED=0）' }, 409)
+      if (!findPlatform(platform) || !item) return json(res, { error: '需要 platform 和 item' }, 400)
+      if (user.role !== 'admin' && !content.hasRef(user.username, platform, item)) return json(res, { error: '没有权限' }, 403)
+      return json(res, {
+        platform,
+        item,
+        media: content.mediaRows(platform, item).map((row) => ({
+          seq: row.seq,
+          kind: row.kind,
+          mime: row.mime,
+          bytes: row.bytes,
+          ready: Boolean(row.sha256 && content.blobExists(row.sha256)),
+        })),
+      })
     }
 
     // ---------------------------------------------------------------- 线索
@@ -606,7 +686,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const platform = String(input.platform ?? '')
       if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
       const list = (value: unknown): string[] => Array.isArray(value) ? value.map((v) => String(v).trim()).filter(Boolean) : String(value ?? '').split(',').map((v) => v.trim()).filter(Boolean)
-      const index = await loadIndex(root, platform)
+      const index = await loadUserIndex(user.username, platform)
       const comments = [...index.comments.values()].flat()
       const leads = buildLeads({ platform, items: index.items, comments, intent: list(input.intent), provinces: list(input.provinces) })
       const store = new LeadStore(join(root, 'leads.jsonl'))
@@ -619,7 +699,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
       let added = 0
       const touched: string[] = []
       for (const platform of CRAWL_PLATFORMS) {
-        const index = await loadIndex(root, platform)
+        const index = await loadUserIndex(user.username, platform)
         const comments = [...index.comments.values()].flat()
         if (!index.items.length && !comments.length) continue
         const leads = buildLeads({ platform, items: index.items, comments })
@@ -679,6 +759,33 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const settings = await loadSettings(user.username)
       return json(res, { ...summarize({ leads, tasks }), settings })
     }
+    if (req.method === 'GET' && url.pathname === '/api/content/stats') {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能看' }, 403)
+      if (!content) return json(res, { enabled: false, hint: 'OMC_SHARED=0 时为按用户落盘' })
+      const since = Date.now() - 30 * 24 * 3600 * 1000
+      return json(res, {
+        enabled: true,
+        dir: sharedDir,
+        config: await loadSharedConfig(sharedDir),
+        usage: content.usage(),
+        reuse: content.reuseStats(since),
+        accounts: (await listUsers()).length,
+      })
+    }
+    if (url.pathname === '/api/content/gc' && (req.method === 'GET' || req.method === 'POST')) {
+      if (user.role !== 'admin') return json(res, { error: '只有 admin 能回收' }, 403)
+      if (!content) return json(res, { error: '共享库未启用（OMC_SHARED=0）' }, 409)
+      let input: Record<string, unknown> = {}
+      if (req.method === 'POST') {
+        try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+        if (String(input.confirm ?? '') !== '确认回收') return json(res, { error: '需要输入「确认回收」' }, 400)
+      } else {
+        input = { days: url.searchParams.get('days') }
+      }
+      const days = Math.min(3650, Math.max(1, Number(input.days ?? 30)))
+      const plan = content.gc({ days, apply: req.method === 'POST' })
+      return json(res, { ...plan, enabled: true })
+    }
 
     // ---------------------------------------------------------------- 账号健康与设置
     if (req.method === 'GET' && url.pathname === '/api/accounts/health') {
@@ -710,6 +817,13 @@ export async function startUiServer(options: { port?: number; host?: string; out
       }
       for (const name of await readdir(root)) {
         if (name.startsWith('.crawl-state-')) { await rm(join(root, name), { force: true }); removed.push(name) }
+      }
+      // 共享模式下「我的采集结果」就是 refs，清空前先删；线索/候选/发送记录已在上面清掉。
+      if (content) {
+        const refs = content.clearRefs(user.username)
+        const masks = content.clearMasks(user.username)
+        if (refs) removed.push(`shared:refs:${refs}`)
+        if (masks) removed.push(`shared:masks:${masks}`)
       }
       return json(res, { removed })
     }
@@ -932,10 +1046,16 @@ export async function startUiServer(options: { port?: number; host?: string; out
         const opts = normalizeCrawlOptions({ ...input, out: userRoot(user.username), quiet: true })
         const env = { CATBUS_HOME: home }
         const itemIds: string[] = []
+        const policy = policyFrom(await loadSharedConfig(sharedDir), parseRefresh(input.refresh))
         try {
           job.result = await runCrawl(opts, {
             client: (options.clientFactory ?? createSubprocessClient)(opts.platform, { sort: opts.sort, env }),
             signal: controller.signal,
+            content: content ?? undefined,
+            user: user.username,
+            account: await currentAccount(user.username, opts.platform),
+            jobId: id,
+            policy,
             onEvent: (event) => {
               if (event.type === 'item' && itemIds.length < 300) {
                 const saved = String((event.data as { id?: unknown } | undefined)?.id ?? '')
@@ -960,7 +1080,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
           }
         }
         for (const client of job.events) client.end()
-        const counts = (job.result as { counts?: { items?: number; comments?: number } } | undefined)?.counts
+        const counts = (job.result as { counts?: { items?: number; comments?: number; newComments?: number; reusedItems?: number; reusedComments?: number; reusedMedia?: number } } | undefined)?.counts
+        const refs = content ? content.refsByJob(user.username, id) : []
         await appendFile(join(userRoot(user.username), 'jobs.jsonl'), JSON.stringify({
           id,
           at: isoNow(),
@@ -969,7 +1090,9 @@ export async function startUiServer(options: { port?: number; host?: string; out
           keywords: opts.keywords ?? [],
           items: counts?.items ?? 0,
           comments: counts?.comments ?? 0,
-          itemIds,
+          newComments: counts?.newComments ?? 0,
+          reused: { items: counts?.reusedItems ?? 0, comments: counts?.reusedComments ?? 0, media: counts?.reusedMedia ?? 0 },
+          itemIds: refs.length ? refs : itemIds,
           status: job.status,
         }) + '\n', 'utf8').catch(() => {})
       })()
@@ -1024,6 +1147,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
     ...(admin.created ? { bootstrap: { username: admin.username, password: admin.password ?? '' } } : {}),
     close: () => new Promise((resolveClose, reject) => {
       for (const login of logins.values()) login.child?.kill()
+      content?.close()
       server.close((error) => error ? reject(error) : resolveClose())
     }),
   }

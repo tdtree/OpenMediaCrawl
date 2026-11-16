@@ -32,3 +32,6 @@ data/
 var/
 *.bak
 .crawl-state-*
+
+# CodeGraph 的本地索引（可用 codegraph init 重建）
+.codegraph/

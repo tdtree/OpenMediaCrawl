@@ -181,12 +181,13 @@ catbus platforms kuaishou | jq -r '.data.commands[] | select(.status=="implement
 
 ## 数据清理（Web 控制台）
 
-评论抓久了会一直堆在 `users/<用户名>/<平台>/*comment*.jsonl`。控制台在「用户管理 → 数据清理」里给出清理入口，规则只有一条：
+评论抓久了会一直堆在 `users/<用户名>/<平台>/*comment*.jsonl`（旧模式）或共享库 `shared/content.sqlite`（默认模式）。控制台在「用户管理 → 数据清理」里给出清理入口，规则只有一条：
 
 > 删掉「超过 N 天、且从未被任何筛选词命中」的评论正文，默认 N=30。
 
 - 筛选词来源：该用户词库里的「评论筛选词」+ 历史上真正用过的筛选词（`filter-history.json`，控制台会自动记录）。
-- 只删评论行；**线索库、发送记录、私信会话、断点状态都不动**。断点状态里仍记着这些评论 id，重跑采集会跳过，不会重复抓取。
+- 共享模式（默认，见 [shared-content.md](shared-content.md)）：评论只有一份，清理写的是**用户掩码**（`user_masks`）——只对这个人隐藏，不影响其他用户；`freedBytes` 报 0 是对的，真要腾空间用 `mediacrawl content gc`。
+- 按文件模式（`OMC_SHARED=0` 或该用户还没有共享引用）：只删评论行；**线索库、发送记录、私信会话、断点状态都不动**。断点状态里仍记着这些评论 id，重跑采集会跳过，不会重复抓取。
 - 缺 `created_at` 的评论判断不了时间，一律跳过。
 - 删除前会把原文件复制成 `*.jsonl.bak`（文件小于 50 MB 时）。
 - 有可清理的评论时，`admin` 的侧栏「用户管理」上会出现红色数字徽标；接口是 `GET /api/admin/cleanup?days=30`（预览）和 `POST /api/admin/cleanup`（要带 `confirm: "确认清理"`）。

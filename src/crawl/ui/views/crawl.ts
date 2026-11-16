@@ -82,6 +82,8 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .crawl-kv>div{border:1px solid var(--line);border-radius:8px;padding:var(--s2) var(--s3)}
 .crawl-kv span{display:block;font-size:var(--fs-xs);color:var(--muted)}
 .crawl-kv b{font-size:var(--fs-lg);font-weight:600;font-variant-numeric:tabular-nums}
+.crawl-new{color:var(--ok);font-weight:600}
+.crawl-media{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin:0 0 var(--s3)}
 .crawl-dt-c{border-top:1px solid var(--line);padding-top:var(--s3)}
 .crawl-dt-ch{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:var(--s2)}
 .crawl-cm{border:1px solid var(--line);border-radius:8px;padding:var(--s2) var(--s3);margin-bottom:var(--s2);content-visibility:auto;contain-intrinsic-size:auto 88px}
@@ -476,7 +478,7 @@ function crawlItemHtml(it){
     '<span class="crawl-it-t">'+esc(it.title||'（无标题）')+'</span>'+
     '<span class="crawl-it-m"><span>'+esc(it.author||'未知作者')+'</span>'+
       '<span>赞 '+num(st.likes)+'</span>'+
-      '<span>评 '+num(it.comments)+'</span></span>'+
+      '<span>评 '+num(it.comments)+(it.new_comments?' <b class="crawl-new">+' + num(it.new_comments) + '</b>':'')+'</span></span>'+
   '</button>';
 }
 
@@ -501,6 +503,7 @@ function crawlRenderDetail(it){
       (it.url?'<p class="tiny"><a href="'+esc(it.url)+'" target="_blank" rel="noopener">打开原页 ↗</a></p>':'<p class="tiny">没有原页链接</p>')+
     '</div></div>'+
     '<div class="crawl-kv">'+cells+'</div>'+
+    '<div class="crawl-media" id="crawlMedia" hidden></div>'+
     '<div class="crawl-dt-c">'+
       '<div class="crawl-dt-ch"><h3>评论</h3><span class="badge" id="crawlCmCount">读取中…</span></div>'+
       '<div class="crawl-cm-bar" id="crawlCmBar" hidden>'+
@@ -527,6 +530,34 @@ function crawlRenderDetail(it){
     '</div>';
   /* 详情是整块重建的，筛选词块按当前状态补回来，免得词块区和筛选词脱节 */
   crawlChipRender('filter');
+  crawlLoadMedia(it);
+}
+
+/* 媒体：只列清单，点开走 /api/media 读共享库的 blob（视频直接浏览器播放/下载）。 */
+async function crawlLoadMedia(it){
+  var box=$('#crawlMedia');
+  if(!box||!it)return;
+  box.hidden=true;box.innerHTML='';
+  try{
+    var r=await api('/api/media/list?platform='+encodeURIComponent(crawlState.recPlatform)+'&item='+encodeURIComponent(it.id));
+    var list=(r&&r.media)||[];
+    if(!list.length)return;
+    var kindName={video:'视频',audio:'音频',image:'图片'};
+    box.innerHTML='<span class="tiny">媒体 '+list.length+' 个</span>'+list.map(function(m){
+      var label=(kindName[m.kind]||'媒体')+' '+(m.seq||'')+(m.bytes?' · '+crawlSize(m.bytes):'');
+      if(!m.ready)return '<span class="badge" title="采集时没下载成功">'+esc(label)+' · 未下载</span>';
+      var href='/api/media?platform='+encodeURIComponent(crawlState.recPlatform)+'&item='+encodeURIComponent(it.id)+'&seq='+encodeURIComponent(String(m.seq));
+      return '<a class="btn sm ghost" href="'+esc(href)+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
+    }).join('');
+    box.hidden=false;
+  }catch(e){/* 媒体只是附加信息，读不到不影响作品和评论 */}
+}
+
+function crawlSize(bytes){
+  var n=Number(bytes)||0;
+  if(n>=1048576)return (n/1048576).toFixed(1)+' MB';
+  if(n>=1024)return Math.round(n/1024)+' KB';
+  return n+' B';
 }
 
 /* 高亮：先把正文当纯文本转义，再只为命中片段套 <mark>；关键词当字面量拼进正则（大小写不敏感），
@@ -569,6 +600,7 @@ function crawlCommentHtml(c,child,kids,tokens){
     '<div class="crawl-cm-h">'+
       '<label class="check crawl-cm-pick"><input type="checkbox" data-crawl-pick="1" aria-label="勾选这条评论"></label>'+
       '<b>'+crawlHl(who,tokens)+'</b>'+
+      (c.first_seen_at&&Date.now()-Number(c.first_seen_at)<7*86400000?'<span class="badge ok" title="最近 7 天新采到的评论">新</span>':'')+
       (c.created_at?'<span class="tiny">'+esc(fmtTime(c.created_at))+'</span>':'')+
       '<span class="tiny">赞 '+num(c.stats&&c.stats.likes)+'</span>'+
       (c.province?'<span class="badge">'+esc(c.province)+'</span>':'')+

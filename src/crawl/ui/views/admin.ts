@@ -292,6 +292,43 @@ export const admin: View = {
       <span class="tiny">这一步会真的删数据：先点「预览」确认条数与体积，再输入「确认清理」。</span>
     </div>
   </div>
+</section>
+
+<section class="sec admin-clean">
+  <div class="sec-head"><h2>共享内容库</h2><span class="sub">所有账号共用的内容：作品、评论、媒体各存一份。这里看体积与复用率，并回收没人引用的旧内容。</span></div>
+  <div class="card admin-bar">
+    <label class="field admin-f-keep"><span>回收超过</span>
+      <select id="adminGcDays">
+        <option value="7">7 天</option>
+        <option value="30" selected>30 天</option>
+        <option value="90">90 天</option>
+        <option value="180">180 天</option>
+      </select>
+    </label>
+    <button class="btn ghost" type="button" id="adminGcPreview">预览回收</button>
+    <span class="spacer"></span>
+    <span class="tiny admin-stamp" id="adminGcStamp" role="status" aria-live="polite">—</span>
+  </div>
+
+  <div class="card" id="adminLibStats"><p class="loading admin-pad">读取中…</p></div>
+  <div class="admin-tbl-wrap" id="adminGcWrap" role="region" aria-label="共享库回收预览"><p class="hint admin-pad">点「预览回收」看没有引用、且超过保留期的作品。</p></div>
+
+  <div class="card admin-danger">
+    <div class="admin-danger-h"><b>危险区</b><span class="tiny">回收后不可恢复</span></div>
+    <p class="sub admin-danger-txt">只删除<b>没有任何用户引用</b>（没人采到过，或引用已被清空）、且超过保留期没再出现的作品、它的评论，以及不再被任何作品引用的媒体字节。<b>被任何账号引用过的内容一条都不会动。</b></p>
+    <div class="admin-danger-act">
+      <button class="btn danger" type="button" id="adminGcRun">执行回收</button>
+      <span class="admin-danger-msg" id="adminGcMsg" role="status" aria-live="polite"></span>
+    </div>
+    <div class="admin-confirm" id="adminGcConfirm" hidden>
+      <label class="field"><span>输入「确认回收」再执行</span>
+        <input id="adminGcInput" type="text" autocomplete="off" spellcheck="false" placeholder="确认回收">
+      </label>
+      <button class="btn danger" type="button" id="adminGcOk" disabled>确认执行回收</button>
+      <button class="btn sm ghost" type="button" id="adminGcCancel">取消</button>
+      <span class="tiny">先「预览回收」确认条数与体积，再输入「确认回收」。</span>
+    </div>
+  </div>
 </section>`,
   js: String.raw`
 /* ---- view: admin ---- */
@@ -323,6 +360,7 @@ export const admin: View = {
   function adminBytes(v){
     var n=Number(v);
     if(!isFinite(n)||n<=0)return '0 KB';
+    if(n<1024)return Math.round(n)+' B';
     var kb=n/1024;
     if(kb<1024)return (kb<10?kb.toFixed(1):String(Math.round(kb)))+' KB';
     var mb=kb/1024;
@@ -1066,6 +1104,158 @@ export const admin: View = {
     adminCleanMsgPaint();
   }
 
+  /* ---------------------------------------------------------------- 共享内容库 */
+  var adminLib={days:30,stage:'idle',busy:false,run:false,stats:null,plan:null,err:'',planErr:'',stamp:'',msg:'',msgKind:''};
+
+  function adminLibHint(text,cls){
+    var box=$('#adminLibStats');
+    if(box)box.innerHTML='<p class="'+(cls||'hint')+' admin-pad">'+esc(text)+'</p>';
+  }
+
+  function adminLibCell(label,value,sub,zero){
+    return '<div class="admin-cell'+(zero?' is-zero':'')+'"><span class="admin-cell-k">'+esc(label)+'</span>'+
+      '<b class="admin-cell-n num">'+esc(String(value))+'</b><span class="admin-cell-s">'+esc(sub||'')+'</span></div>';
+  }
+
+  function adminLibRender(){
+    var stamp=$('#adminGcStamp');
+    if(stamp)stamp.textContent=adminLib.stamp?('更新于 '+adminLib.stamp):'—';
+    var box=$('#adminLibStats');
+    if(box){
+      if(adminLib.err)adminLibHint('共享库没读到：'+adminLib.err);
+      else if(!adminLib.stats)adminLibHint('读取中…','loading');
+      else if(adminLib.stats.enabled===false)adminLibHint('共享库未启用（OMC_SHARED=0），当前按用户落盘。');
+      else{
+        var u=adminLib.stats.usage||{},r=adminLib.stats.reuse||{},k=r.byKind||{};
+        var fetched=Number(r.fetched||0),reused=Number(r.reused||0);
+        var ratio=(fetched+reused)>0?Math.round(reused*100/(fetched+reused)):0;
+        var cells=adminLibCell('作品',num(u.items),'共享库唯一作品数',!u.items)
+          +adminLibCell('评论',num(u.comments),'按评论 id 去重',!u.comments)
+          +adminLibCell('媒体',num(u.blobs),adminBytes(u.blobBytes||0),!u.blobs)
+          +adminLibCell('库体积',adminBytes((u.dbBytes||0)+(u.walBytes||0)),'含索引与 WAL',!u.dbBytes);
+        var sums='<span>引用 <b>'+num(u.refs)+'</b> 条 · '+num(u.users)+' 个账号</span>'
+          +'<span>近 30 天：抓取 <b>'+num(fetched)+'</b> 次 · 复用 <b>'+num(reused)+'</b> 次 · 复用率 <b>'+ratio+'%</b></span>'
+          +(k.item?'<span>作品 抓 '+num(k.item.fetched)+' / 复 '+num(k.item.reused)+'</span>':'')
+          +(k.comments?'<span>评论 抓 '+num(k.comments.fetched)+' / 复 '+num(k.comments.reused)+'</span>':'')
+          +'<span class="tiny">'+esc(adminLib.stats.dir||'')+'</span>';
+        box.innerHTML='<div class="admin-ledger">'+cells+'</div><div class="admin-sum">'+sums+'</div>';
+      }
+    }
+    adminLibRenderPlan();
+  }
+
+  function adminLibRenderPlan(){
+    var wrap=$('#adminGcWrap');if(!wrap)return;
+    if(adminLib.planErr){wrap.innerHTML='<p class="hint admin-pad">回收预览没取到：'+esc(adminLib.planErr)+'。</p>';return}
+    if(!adminLib.plan){wrap.innerHTML='<p class="hint admin-pad">点「预览回收」看没有引用、且超过保留期的作品。</p>';return}
+    var p=adminLib.plan;
+    var summary='<div class="admin-clean-note" role="status">可回收作品 '+num(p.items?p.items.length:0)+' 条 · 评论 '+num(p.comments)+' 条 · 媒体 '+num(p.blobs)+' 个（'+adminBytes(p.bytes||0)+'）</div>';
+    if(!p.items||!p.items.length){
+      wrap.innerHTML=summary+'<div class="empty"><b>没有可回收的内容</b><p class="sub">所有内容都还被至少一个账号引用，或还没超过保留期。</p></div>';
+      return;
+    }
+    var rows=p.items.slice(0,50).map(function(it){
+      return '<tr><td>'+esc(it.platform)+'</td><td class="mono">'+esc(it.id)+'</td></tr>';
+    }).join('');
+    wrap.innerHTML=summary
+      +'<table class="tbl admin-tbl"><thead><tr><th>平台</th><th>作品 ID</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      +(p.items.length>50?'<p class="hint admin-pad">只列前 50 条，共 '+num(p.items.length)+' 条。</p>':'');
+  }
+
+  async function adminLibLoad(){
+    if(adminLib.busy)return;
+    adminLib.busy=true;adminLib.err='';
+    adminLibHint('读取中…','loading');
+    try{adminLib.stats=await api('/api/content/stats');adminLib.stamp=adminClock()}
+    catch(error){adminLib.err=adminErrText(error);adminLib.stats=null}
+    adminLib.busy=false;
+    adminLibRender();
+  }
+
+  async function adminGcPreview(){
+    if(adminLib.busy||adminLib.run)return;
+    adminLib.busy=true;adminLib.planErr='';adminLib.plan=null;
+    var wrap=$('#adminGcWrap');if(wrap)wrap.innerHTML='<p class="loading admin-pad">读取中…</p>';
+    adminGcSync();
+    try{adminLib.plan=await api('/api/content/gc?days='+encodeURIComponent(String(adminLib.days)));adminLib.stamp=adminClock()}
+    catch(error){adminLib.planErr=adminErrText(error)}
+    adminLib.busy=false;
+    adminLibRender();
+  }
+
+  function adminGcConfirmHit(){
+    var input=$('#adminGcInput');
+    return String(input?input.value:'').trim()==='确认回收';
+  }
+
+  function adminGcMsgPaint(){
+    var el=$('#adminGcMsg');if(!el)return;
+    el.className='admin-danger-msg'+(adminLib.msgKind?' is-'+adminLib.msgKind:'');
+    el.textContent=adminLib.msg;
+  }
+
+  function adminGcSync(){
+    var pre=$('#adminGcPreview'),run=$('#adminGcRun'),ok=$('#adminGcOk');
+    var locked=!!(adminLib.busy||adminLib.run);
+    if(pre)pre.disabled=locked;
+    if(run){run.disabled=locked;run.textContent=adminLib.run?'回收中…':'执行回收'}
+    if(ok)ok.disabled=locked||!adminGcConfirmHit();
+  }
+
+  function adminGcStageSet(stage){
+    adminLib.stage=stage==='confirm'?'confirm':'idle';
+    var box=$('#adminGcConfirm');if(box)box.hidden=adminLib.stage!=='confirm';
+    var input=$('#adminGcInput');if(input)input.value='';
+    adminGcSync();
+    if(adminLib.stage==='confirm'&&input)setTimeout(function(){try{input.focus()}catch(e){}},0);
+  }
+
+  async function adminGcApply(){
+    if(adminLib.run||adminLib.busy)return;
+    if(!adminGcConfirmHit())return;
+    adminLib.run=true;adminLib.msg='回收中…';adminLib.msgKind='';
+    adminGcMsgPaint();adminGcSync();
+    var out=null,err='';
+    try{out=await post('/api/content/gc',{days:adminLib.days,confirm:'确认回收'})}
+    catch(error){err=adminErrText(error)}
+    adminLib.run=false;
+    adminGcStageSet('idle');
+    if(err){
+      adminLib.msg='回收失败：'+err;adminLib.msgKind='bad';
+      adminGcMsgPaint();toast('回收失败','err');
+      return;
+    }
+    adminLib.msg='已回收作品 '+num(out&&out.items?out.items.length:0)+' 条、评论 '+num(out&&out.comments)+' 条，释放 '+adminBytes((out&&out.bytes)||0);
+    adminLib.msgKind=(out&&out.items&&out.items.length)?'ok':'';
+    adminGcMsgPaint();
+    toast('回收完成','ok');
+    adminLib.plan=null;
+    await adminLibLoad();
+  }
+
+  function adminGcBind(){
+    var sel=$('#adminGcDays');
+    if(sel)sel.onchange=function(){var v=Number(sel.value);adminLib.days=v>0?v:30;adminLib.plan=null;adminLib.planErr='';adminLibRenderPlan()};
+    var pre=$('#adminGcPreview');
+    if(pre)pre.onclick=function(){adminGcPreview()};
+    var run=$('#adminGcRun');
+    if(run)run.onclick=function(){if(adminLib.run||adminLib.busy)return;adminGcStageSet(adminLib.stage==='confirm'?'idle':'confirm')};
+    var input=$('#adminGcInput');
+    if(input){
+      input.oninput=function(){adminGcSync()};
+      input.onkeydown=function(ev){
+        var key=ev.key||'';
+        if(key==='Enter'){ev.preventDefault();if(adminGcConfirmHit())adminGcApply();return}
+        if(key==='Escape'){ev.preventDefault();adminGcStageSet('idle')}
+      };
+    }
+    var ok=$('#adminGcOk');
+    if(ok)ok.onclick=function(){adminGcApply()};
+    var cancel=$('#adminGcCancel');
+    if(cancel)cancel.onclick=function(){adminGcStageSet('idle')};
+    adminGcSync();adminGcMsgPaint();
+  }
+
   /* ---------------------------------------------------------------- 错误横幅 */
   function adminShowErr(message){
     var box=$('#adminErr');if(!box)return;
@@ -1191,6 +1381,7 @@ export const admin: View = {
 
   adminBind();
   adminCleanBind();
+  adminGcBind();
 
 /* ---------------------------------------------------------------- 群发参数 */
 async function adminSendLoad(){
@@ -1222,6 +1413,7 @@ if(adminSendForm)adminSendForm.addEventListener('submit',async function(ev){
   omc.onShow('admin',adminLoad);
   omc.onShow('admin',adminSendLoad);
   omc.onShow('admin',adminCleanLoad);
+  omc.onShow('admin',adminLibLoad);
 })();
 `,
 }

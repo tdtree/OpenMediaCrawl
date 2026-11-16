@@ -21,6 +21,10 @@ export interface CrawlOptions {
   sort?: string
   quiet: boolean
   config?: string
+  /** 共享内容库目录；false 表示按用户落盘，true 表示用 <out>/shared。 */
+  shared?: string | boolean
+  /** 复用策略：auto 按 TTL、always 强制重抓、never 有就不抓。 */
+  refresh?: 'auto' | 'always' | 'never'
 }
 
 export interface SearchPage<T> {
@@ -52,7 +56,20 @@ export interface CrawlResult {
   jobId: string
   platform: CrawlPlatform
   type: CrawlType
-  counts: { items: number; comments: number; creators: number; skipped: number }
+  counts: {
+    items: number
+    comments: number
+    creators: number
+    skipped: number
+    /** 本次真正新增的评论条数（按评论 id 去重后），增量采集看这个。 */
+    newComments: number
+    /** 复用的作品条数（没有发 detail）。 */
+    reusedItems: number
+    /** 复用的评论条数。 */
+    reusedComments: number
+    /** 媒体已经齐全、没有重新下载的作品数。 */
+    reusedMedia: number
+  }
   files: string[]
   stateFile: string
 }

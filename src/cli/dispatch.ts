@@ -45,7 +45,7 @@ export async function run(argv: string[]): Promise<number> {
   try {
     // OpenMediaCrawl keeps the original catbus grammar intact while adding a
     // separate batch-crawl command with its own option vocabulary.
-    if (argv[0] === 'crawl' || argv[0] === 'wordcloud' || argv[0] === 'ui') {
+    if (argv[0] === 'crawl' || argv[0] === 'content' || argv[0] === 'wordcloud' || argv[0] === 'ui') {
       const { runOpenMediaCommand } = await import('../crawl/cli.js')
       return await runOpenMediaCommand(argv)
     }

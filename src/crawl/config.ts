@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { parseRefresh } from './shared/config.js'
 import type { CrawlOptions, CrawlPlatform, CrawlType, SaveFormat } from './types.js'
 import { splitValues } from './types.js'
 
@@ -7,7 +8,7 @@ export const CRAWL_TYPES: CrawlType[] = ['search', 'detail', 'creator']
 
 export const DEFAULT_CRAWL_OPTIONS: Omit<CrawlOptions, 'platform' | 'type'> = {
   keywords: [], ids: [], creators: [], maxItems: 50, comments: false, subComments: false, maxComments: 0,
-  media: false, save: 'jsonl', out: './data', sleep: '2-5', quiet: false,
+  media: false, save: 'jsonl', out: './data', sleep: '2-5', quiet: false, shared: false, refresh: 'auto',
 }
 
 function scalar(value: string): unknown {
@@ -65,6 +66,11 @@ export function normalizeCrawlOptions(input: Record<string, unknown>): CrawlOpti
     sleep: String(input.sleep ?? DEFAULT_CRAWL_OPTIONS.sleep),
     sort: typeof input.sort === 'string' && input.sort ? input.sort : undefined,
     quiet: bool('quiet', false), config: typeof input.config === 'string' ? input.config : undefined,
+    // --shared 不带值（true）时用 <out>/shared；显式目录就用它；false 关闭。
+    shared: input.shared === true || input.shared === 'true'
+      ? true
+      : typeof input.shared === 'string' && input.shared && input.shared !== 'false' ? input.shared : false,
+    refresh: parseRefresh(input.refresh),
   }
 }
 

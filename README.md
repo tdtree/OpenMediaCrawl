@@ -146,6 +146,39 @@ data/
 
 SQLite 模式写入一个库，`items` / `comments` / `creators` 三张表，按 `(platform, id)` 去重更新。
 
+## 🧩 共享内容库（多账号 / 多用户去重）
+
+几个账号采同一个关键词时，搜索结果会大量重叠。Web 控制台默认打开共享库（`OMC_SHARED=0` 关闭），
+命令行加 `--shared` 开启：
+
+- 一条作品以 **`(平台, 作品 id)`** 唯一。第一次抓到的正文、评论、媒体入库；
+  后面无论是哪个用户、哪个登录账号再采到同一条，都直接复用库里的数据 —— 不再请求平台，也不在用户目录里再存一份。
+- 媒体按 **sha256** 只存一份：同一个视频被搬运号二次发布的，也只占一份字节。
+- 用户目录里只留「我采到过哪些」的引用（refs），以及各自的提取结果（线索、候选池、词库、私信/群发记录）。
+  **内容是公用的，提取是各算各的。**
+- 两个账号同时命中同一条时靠租约（`claims`）只放一个去请求，另一个等结果。
+- 增量评论：每条评论记 `first_seen_at`。过了评论窗口重抓时按评论 id 合并——老评论保留，只追加新的；
+  采集结果里的 `newComments` 是真正新增的条数，列表和评论树会给 7 天内新出现的评论标「新」。
+- 控制台里能看到媒体的下载结果（详情页「媒体 N 个」，点开走 `/api/media` 读共享库的 blob），
+  「用户管理 → 共享内容库」有体积、复用率和「预览/执行回收」。
+
+```
+data/shared/
+├── content.sqlite              # items / comments / creators / refs / fetch_log
+├── blobs/<aa>/<sha256>.<ext>   # 媒体实体，按内容哈希
+└── config.json                 # 复用窗口：作品正文 30 天、评论 24 小时、媒体永久
+```
+
+```bash
+mediacrawl content import --root ./data            # 预览：旧数据能导入多少
+mediacrawl content import --root ./data --apply    # 幂等导入，不删原文件
+mediacrawl content stats  --root ./data            # 作品/评论/媒体数量 + 近 30 天复用率
+mediacrawl content gc     --root ./data --days 30 --apply   # 回收没人引用的旧内容
+```
+
+复用窗口可在 `data/shared/config.json` 里改（`itemTtlDays` / `commentTtlHours`）；
+`--refresh always` 强制重抓、`--refresh never` 有就不抓。控制台里清理旧评论变成「对自己隐藏」（`user_masks`），不动共享数据。
+
 ## ☁️ 评论词云
 
 ```bash
@@ -179,7 +212,9 @@ mediacrawl ui --port 8080     # 打开 http://127.0.0.1:8080
 
 ### 多用户
 
-每个用户的采集数据在 `<--out>/users/<用户名>/`，登录态在自己的 `users/<用户名>/.catbus/`，互相看不到。
+每个用户的采集结果在 `<--out>/users/<用户名>/`，登录态在自己的 `users/<用户名>/.catbus/`。
+内容本身放在 `<--out>/shared/`（共享库）：同一件作品只留一份正文/评论/媒体，
+每个用户靠引用（refs）看到自己采过的部分；线索、候选池、词库、群发记录仍然各算各的。
 
 账号有三种状态：**待审核 / 正常 / 停用**。登录页可以自助申请（账号填真实姓名、密码自己设），提交后是「待审核」，管理员在「账号与设置 → 用户」里点「通过」才能登录；管理员也可以停用、启用、重置密码、升降权（至少保留一个 admin）。用户存在 `<OMC_HOME|~/.openmediacrawl>/users.json`，密码只存 scrypt 哈希；会话在内存里，进程重启后要重新登录。规则、接口和安全边界见 [docs/guide/users.md](docs/guide/users.md)。
 
