@@ -104,6 +104,45 @@ describe('共享内容库', () => {
     expect(decideReuse(snapshot({ media: { total: 2, ready: 1 } }), request, DEFAULT_POLICY, now).downloadMedia).toBe(true)
   })
 
+  it('旧断点文件 + 空共享库：不能整条跳过，要补引用再跳过', async () => {
+    const shared = await tempDir()
+    const store = openContentStore(join(shared, 'shared'))
+    try {
+      const out = await tempDir()
+      // 旧版按用户落盘留下的断点：这些 id 都「采过」了，但共享库还没有任何内容。
+      await writeFile(join(out, '.crawl-state-xhs-search.json'), JSON.stringify({
+        items: ['i1'], comments: [], creators: [], tasks: {}, finished: true,
+      }), 'utf8')
+      const calls: string[] = []
+      const first = await runCrawl(options(out), { client: client(calls), content: store, user: 'alice', jobId: 'j1' })
+      expect(first.counts).toMatchObject({ items: 1, skipped: 0 })
+      expect(store.hasRef('alice', 'xhs', 'i1')).toBe(true)
+      expect(store.getItem('xhs', 'i1')?.body).toBe('full')
+
+      // 第二次：引用已经有了，断点正常生效，不再请求详情/评论。
+      calls.length = 0
+      const second = await runCrawl(options(out), { client: client(calls), content: store, user: 'alice', jobId: 'j2' })
+      expect(calls).toEqual(['search:k:null'])
+      expect(second.counts).toMatchObject({ items: 0, skipped: 1 })
+    } finally { store.close() }
+  })
+
+  it('中断的旧断点（关键词记着已完成）+ 空共享库：关键词要重跑而不是整段跳过', async () => {
+    const shared = await tempDir()
+    const store = openContentStore(join(shared, 'shared'))
+    try {
+      const out = await tempDir()
+      await writeFile(join(out, '.crawl-state-xhs-search.json'), JSON.stringify({
+        items: [], comments: [], creators: [], tasks: { 'search:k': { cursor: null, done: true } }, finished: false,
+      }), 'utf8')
+      const calls: string[] = []
+      const result = await runCrawl(options(out), { client: client(calls), content: store, user: 'alice', jobId: 'j1' })
+      expect(calls[0]).toBe('search:k:null')
+      expect(result.counts.items).toBe(1)
+      expect(store.hasRef('alice', 'xhs', 'i1')).toBe(true)
+    } finally { store.close() }
+  })
+
   it('两个用户采同一个关键词：第二个用户零详情、零评论请求，存储只有一份', async () => {
     const shared = await tempDir()
     const store = openContentStore(join(shared, 'shared'))

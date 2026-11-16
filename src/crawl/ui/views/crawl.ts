@@ -160,7 +160,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
           </select>
         </label>
         <label class="field"><span>间隔秒数</span><input id="crawlSleep" name="sleep" value="2-5" placeholder="2-5 或 3"></label>
-        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="0" placeholder="0 = 不限"></label>
+        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="20" placeholder="20（0 = 不限）"></label>
         <div class="field crawl-wide"><span>附加</span>
           <div class="crawl-checks">
             <label class="check"><input type="checkbox" id="crawlOptComments" checked> 评论</label>
@@ -1092,13 +1092,37 @@ async function crawlSubmit(ev){
   try{
     var r=await post('/api/jobs',payload);
     toast('任务已启动');
-    crawlMsg(msg,'任务已启动，可在触达页看日志'+(r&&r.id?'（'+String(r.id).slice(0,8)+'）':'')+'。','ok');
+    crawlMsg(msg,'任务已启动'+(r&&r.id?'（'+String(r.id).slice(0,8)+'）':'')+'，正在等待平台返回…','ok');
     try{omc.call('refreshJobs')}catch(e){}
+    if(r&&r.id)crawlWatchJob(r.id);
   }catch(e){
     crawlMsg(msg,'启动失败：'+e.message,'err');
     toast('启动失败：'+e.message,'err');
   }finally{
     if(btn)btn.disabled=false;
+  }
+}
+
+/* 启动后盯这个任务：把最后一条进度显示在表单下面，结束就刷新「已采数据」。 */
+async function crawlWatchJob(id){
+  var msg=$('#crawlFormMsg');
+  var deadline=Date.now()+15*60*1000;
+  while(Date.now()<deadline){
+    await new Promise(function(done){setTimeout(done,2000)});
+    var r=null;
+    try{r=await api('/api/jobs/'+encodeURIComponent(id)+'/log')}catch(e){return}
+    if(!r)return;
+    var lines=(r.lines||[]).filter(function(line){return line.type!=='item'&&line.type!=='comment'});
+    var last=lines.length?String(lines[lines.length-1].message||''):'';
+    if(r.status==='running'){
+      crawlMsg(msg,'任务运行中：'+(last||'等待平台返回…'),'');
+      continue;
+    }
+    var label=r.status==='done'?'完成':(r.status==='stopped'?'已停止':'失败');
+    crawlMsg(msg,'任务'+label+(last?'：'+last:''),r.status==='done'?'ok':'err');
+    toast('任务'+label,r.status==='done'?'ok':'err');
+    try{await crawlLoadRecords()}catch(e){}
+    return;
   }
 }
 

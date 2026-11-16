@@ -248,7 +248,13 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
   const processItem = async (seed: Item, fetched = false) => {
     const seedId = seed?.id == null ? null : String(seed.id)
     if (!seedId) return
-    if (seen.item.has(seedId)) { counts.skipped++; return }
+    if (seen.item.has(seedId)) {
+      // 旧的断点文件记着这条，但共享库里这个用户还没有引用（刚切到共享模式）——
+      // 这时跳过会让任务「什么都没发生」，所以补一次：处理它、建引用，之后再跳过。
+      const covered = content && deps.user ? content.hasRef(deps.user, platform, seedId) : false
+      if (!content || covered) { counts.skipped++; return }
+      seen.item.delete(seedId)
+    }
 
     const existing = content?.getItem(platform, seedId) ?? null
     let item = seed
@@ -326,6 +332,7 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
         counts.reusedComments += content.commentCount(platform, seedId)
         logFetch(seedId, 'comments', 'reused')
       } else {
+        emit('log', `拉取评论 ${seedId}（${options.maxComments > 0 ? `最多 ${options.maxComments} 条` : '不限，热门作品可能很慢'}）`)
         const startedAt = Date.now()
         const didWork = await withClaim(seedId, 'comments', startedAt, () => {
           const ready = content?.getCommentsState(platform, seedId)
@@ -359,6 +366,7 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
           counts.reusedMedia++
           logFetch(seedId, 'media', 'reused')
         } else if (rows.length > 0) {
+          emit('log', `下载媒体 ${seedId}（${rows.length} 个）…`)
           try {
             const written = await ingestMedia(item, seedId)
             logFetch(seedId, 'media', 'fetched')
@@ -390,8 +398,15 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
    */
   const walk = async (key: string, fetchPage: (cursor: string | null) => Promise<SearchPage<Item> | Item[]>, limit: number) => {
     const task = state.tasks[key]
-    if (task?.done) { emit('log', `skip ${key}（上一轮已完成）`); return }
-    let cursor: string | null = task?.cursor ?? null
+    if (task?.done) {
+      // 共享模式下「这一轮跑完过」不等于「共享库里有这批数据」：旧版断点可能一个引用都没建。
+      // 只有这个来源确实留下过引用，才整段跳过；否则按没跑过处理。
+      const covered = !content || !deps.user || content.listRefs(deps.user, platform).some((ref) => ref.keyword === source)
+      if (covered) { emit('log', `skip ${key}（上一轮已完成）`); return }
+      emit('log', `重跑 ${key}（断点里记过，但共享库还没有这批数据）`)
+      state.tasks[key] = { cursor: null, done: false }
+    }
+    let cursor: string | null = state.tasks[key]?.cursor ?? null
     if (cursor) emit('log', `resume ${key}（从存下的游标继续）`)
     let total = 0
     while (total < limit) {
@@ -416,6 +431,9 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
   }
 
   try {
+    if (options.comments && options.maxComments === 0) {
+      emit('log', '评论上限为 0（不限）：热门视频可能上万条评论，容易看起来像卡住；建议填 20-100')
+    }
     if (options.type === 'search') {
       if (!options.keywords.length) throw new CatbusError('USAGE', 'search needs --keywords')
       for (const keyword of options.keywords) {
@@ -429,7 +447,11 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
       source = null
       for (const id of options.ids.slice(0, options.maxItems)) {
         stopped()
-        if (seen.item.has(id)) { counts.skipped++; continue }
+        if (seen.item.has(id)) {
+          const covered = content && deps.user ? content.hasRef(deps.user, platform, id) : false
+          if (!content || covered) { counts.skipped++; continue }
+          seen.item.delete(id)
+        }
         await processItem(await retry(() => client.detail(id)), true)
       }
     } else {

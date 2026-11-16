@@ -356,7 +356,7 @@ describe('web UI', () => {
         status = await (await fetch(`${base}/api/login/${id}`, { headers: { cookie } })).json() as typeof status
       }
       expect(status.status).toBe('error')
-      expect(status.message).toContain('3 分钟')
+      expect(status.message).toContain('有效期内')
       expect(status.message).not.toContain('▀')
     } finally { await ui.close() }
   })

@@ -1162,7 +1162,7 @@ function describeLoginFailure(stdout: string, stderr: string, code: number | nul
       const message = envelope.error?.message
       if (message) {
         if (/过期/.test(message)) return '二维码已过期，重新点扫码'
-        if (/超时/.test(message)) return '扫码后 3 分钟内没有收到手机上的确认，重新点扫码再试'
+        if (/超时/.test(message)) return '扫码后没有在有效期内收到手机上的确认，重新点扫码再试'
         if (/风控|验证码|captcha/i.test(message)) return `平台风控：${message}`
         return envelope.error?.hint ? `${message}（${envelope.error.hint}）` : message
       }

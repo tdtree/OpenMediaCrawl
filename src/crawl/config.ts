@@ -7,7 +7,8 @@ export const CRAWL_PLATFORMS: CrawlPlatform[] = ['xhs', 'douyin', 'kuaishou', 'b
 export const CRAWL_TYPES: CrawlType[] = ['search', 'detail', 'creator']
 
 export const DEFAULT_CRAWL_OPTIONS: Omit<CrawlOptions, 'platform' | 'type'> = {
-  keywords: [], ids: [], creators: [], maxItems: 50, comments: false, subComments: false, maxComments: 0,
+  // 评论默认限量：热门视频动辄上万条，0（不限）只适合明确要全量时手动填。
+  keywords: [], ids: [], creators: [], maxItems: 50, comments: false, subComments: false, maxComments: 20,
   media: false, save: 'jsonl', out: './data', sleep: '2-5', quiet: false, shared: false, refresh: 'auto',
 }
 
