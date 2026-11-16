@@ -34,10 +34,13 @@ const HTML = String.raw`
         <div class="row" style="margin-top:8px">
           <button class="ghost" id="accountCookieBtn" type="button">用 Cookie 登录</button>
           <button class="ghost sm" id="accountImportBtn" type="button">导入 dy.json</button>
+          <button class="ghost sm" id="accountCaptureCmdBtn" type="button">复制抓取命令</button>
+          <button class="ghost sm" id="accountCaptureBatBtn" type="button">下载 .bat</button>
           <input id="accountImportFile" type="file" accept=".json,application/json" hidden>
           <span class="tiny" id="accountCookieMsg" role="status" aria-live="polite"></span>
         </div>
-        <p class="hint">dy.json 用本机 <code>npm run capture:douyin</code> 生成（打开 Chrome 扫码，自动抓 5 项）。容器里跑不了，需在装了 Chrome 的电脑上执行。</p>
+        <p class="hint">本机抓取：Windows 的 cmd 里运行下面命令（第一次先 <code>npm install</code>），Chrome 会打开抖音，扫码后自动生成 dy.json，再点「导入 dy.json」。容器里跑不了。</p>
+        <input id="accountCaptureCmd" class="mono tiny" readonly aria-label="本机抓取命令" value="cd /d C:\code\OpenMediaCrawl && npm run capture:douyin" style="margin-top:6px">
       </details>
       <div class="account-qr" id="accountQrBox" hidden>
         <img id="accountQrImg" alt="登录二维码" width="220" height="220" loading="lazy">
@@ -847,6 +850,34 @@ $('#accountScanBtn').onclick=function(){
   var p=$('#accountPlatform').value;
   if(!p){$('#accountAccMsg').textContent='先选平台';return}
   accountStartLogin({platform:p},this);
+};
+
+$('#accountCaptureCmdBtn').onclick=async function(){
+  var cmd='cd /d C:\\code\\OpenMediaCrawl && npm run capture:douyin';
+  var ok=false;
+  try{ if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(cmd);ok=true} }catch(e){}
+  if(!ok){
+    try{
+      var ta=document.createElement('textarea');
+      ta.value=cmd;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();ok=document.execCommand('copy');document.body.removeChild(ta);
+    }catch(e){ok=false}
+  }
+  toast(ok?'命令已复制，到 Windows 的 cmd 里粘贴运行':'命令行已选中，按 Ctrl+C 复制',ok?'ok':'');
+  if(!ok){
+    var el=$('#accountCaptureCmd');
+    if(el){el.focus();el.select()}
+  }
+};
+$('#accountCaptureBatBtn').onclick=function(){
+  var bat='@echo off\r\ncd /d C:\\code\\OpenMediaCrawl\r\nnpm run capture:douyin\r\npause\r\n';
+  var blob=new Blob([bat],{type:'application/octet-stream'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='capture-douyin.bat';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(a.href)},1000);
+  toast('已下载 capture-douyin.bat，双击运行');
 };
 
 $('#accountImportBtn').onclick=function(){var f=$('#accountImportFile');if(f)f.click()};

@@ -164,14 +164,17 @@ catbus douyin auth login --method cookie --cookie @dy.json
 
 #### 一键抓取（本机 Chrome）
 
-本机装了 Chrome 时，不用手动翻 localStorage 和 Network：
+本机装了 Chrome 时，不用手动翻 localStorage 和 Network。具体操作：
 
-```bash
-npm run capture:douyin
-```
+1. 在 Windows 上按 `Win+R`，输入 `cmd`，回车
+2. `cd /d C:\code\OpenMediaCrawl`
+3. 第一次先装依赖：`npm install`
+4. 运行：`npm run capture:douyin`
+5. 脚本会打开一个独立的 Chrome 窗口和抖音首页；点右上角「登录」→ 扫码，有二次验证按页面提示完成
+6. 抓齐 `cookie / ticket / ts_sign / client_cert / private_key` 五项后自动退出，生成 `C:\code\OpenMediaCrawl\dy.json`
+7. 回控制台：账号与设置 → 粘贴 Cookie → 「导入 dy.json」→ 确认平台 → 「用 Cookie 登录」
 
-脚本会打开一个独立的 Chrome 配置目录 `.chrome-dy`，首次在窗口里扫码登录；登录过程中同时从网络响应和 `crypto.subtle` 取 `cookie / ticket / ts_sign / client_cert / private_key`，抓齐 5 项自动退出并生成 `dy.json`。
-然后到 账号与设置 → 粘贴 Cookie → 「导入 dy.json」→ 确认平台 → 「用 Cookie 登录」。
+控制台里也提供「复制抓取命令」和「下载 .bat」两个按钮：复制后到 cmd 里粘贴即可；`.bat` 双击运行，效果相同。
 
 - `DY_FRESH=1 npm run capture:douyin`：清掉旧登录态重新扫码
 - `CHROME_PATH=...`、`DY_OUT=...`、`DY_TIMEOUT_MS=...` 可覆盖默认
