@@ -225,11 +225,33 @@ function cmd(method, params = {}, sessionId) {
 
 const { targetId } = await cmd('Target.createTarget', { url: 'about:blank' })
 const { sessionId } = await cmd('Target.attachToTarget', { targetId, flatten: true })
-await cmd('Page.enable', {}, sessionId)
-await cmd('Runtime.enable', {}, sessionId)
-await cmd('Network.enable', {}, sessionId)
-await cmd('Runtime.addBinding', { name: '__dyReport' }, sessionId)
-await cmd('Page.addScriptToEvaluateOnNewDocument', { source: `(${pageHook.toString()})()` }, sessionId)
+
+const ready = new Set()
+async function setupSession(sid) {
+  if (!sid || ready.has(sid)) return
+  ready.add(sid)
+  await cmd('Page.enable', {}, sid)
+  await cmd('Runtime.enable', {}, sid)
+  await cmd('Network.enable', {}, sid)
+  await cmd('Runtime.addBinding', { name: '__dyReport' }, sid)
+  await cmd('Page.addScriptToEvaluateOnNewDocument', { source: `(${pageHook.toString()})()` }, sid)
+}
+await setupSession(sessionId)
+
+// 登录可能开新标签页：自动挂上所有 page，保证 network / crypto hook 都装上
+await cmd('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }).catch(() => {})
+handlers.push((msg) => {
+  if (msg.method !== 'Target.attachedToTarget') return
+  const p = msg.params || {}
+  const target = p.targetInfo || {}
+  if (target.type !== 'page') {
+    cmd('Runtime.runIfWaitingForDebugger', {}, p.sessionId).catch(() => {})
+    return
+  }
+  setupSession(p.sessionId)
+    .then(() => cmd('Runtime.runIfWaitingForDebugger', {}, p.sessionId))
+    .catch(() => {})
+})
 
 handlers.push((msg) => {
   if (msg.method === 'Runtime.bindingCalled' && msg.params && msg.params.name === '__dyReport') {
