@@ -252,7 +252,7 @@ export const admin: View = {
     </div>
     <div class="row" style="margin-top:10px">
       <button class="primary" id="adminSendSave" type="submit">保存</button>
-      <span class="tiny" id="adminSendMsg"></span>
+      <span class="tiny" id="adminSendMsg" role="status" aria-live="polite"></span>
     </div>
     <p class="hint">单日上限与一次最多 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。默认 25 条/天、一次 50 条、30-90 秒。</p>
   </form>

@@ -111,7 +111,7 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
         </span>
       </div>
       <div class="leads-chips" id="leadsQChips" data-leads-chips="q">
-        <input id="leadsQInput" class="leads-chip-in" type="text" autocomplete="off" aria-describedby="leadsQHint" placeholder="评论或昵称，空格 / 逗号 / 回车切词">
+        <input id="leadsQInput" class="leads-chip-in" type="text" autocomplete="off" aria-describedby="leadsQHint" placeholder="评论或昵称，空格 / 逗号 / 回车切词…">
       </div>
     </div>
     <label class="field leads-f-province"><span>省份</span>

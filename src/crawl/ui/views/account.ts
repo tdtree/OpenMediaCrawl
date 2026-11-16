@@ -16,25 +16,25 @@ const HTML = String.raw`
         <button class="primary" id="accountScanBtn" type="button">扫码登录</button>
         <button class="ghost" id="accountHealthBtn" type="button">检查登录态</button>
       </div>
-      <p class="tiny" id="accountHealthMsg" style="margin-top:8px">还没检查过登录态。</p>
+      <p class="tiny" id="accountHealthMsg" style="margin-top:8px" role="status" aria-live="polite">还没检查过登录态。</p>
       <details class="account-cookie" id="accountCookieBox">
         <summary class="btn ghost">粘贴 Cookie</summary>
         <label class="field" style="margin-top:8px"><span>Cookie</span>
-          <textarea id="accountCookie" rows="3" placeholder="name=value; name2=value2"></textarea>
+          <textarea id="accountCookie" rows="3" placeholder="name=value; name2=value2…"></textarea>
         </label>
         <div class="row" style="margin-top:8px">
           <button class="ghost" id="accountCookieBtn" type="button">用 Cookie 登录</button>
-          <span class="tiny" id="accountCookieMsg"></span>
+          <span class="tiny" id="accountCookieMsg" role="status" aria-live="polite"></span>
         </div>
       </details>
       <div class="account-qr" id="accountQrBox" hidden>
-        <img id="accountQrImg" alt="登录二维码">
-        <p class="tiny" id="accountQrMsg">请用 App 扫码</p>
+        <img id="accountQrImg" alt="登录二维码" width="220" height="220" loading="lazy">
+        <p class="tiny" id="accountQrMsg" role="status" aria-live="polite">请用 App 扫码</p>
       </div>
-      <p class="hint" id="accountAccMsg">登录态只存在你自己的数据目录里。</p>
+      <p class="hint" id="accountAccMsg" role="status" aria-live="polite">登录态只存在你自己的数据目录里。</p>
     </div>
     <div class="card">
-      <div class="row"><h3>账号</h3><span class="spacer"></span><span class="tiny" id="accountListMsg"></span></div>
+      <div class="row"><h3>账号</h3><span class="spacer"></span><span class="tiny" id="accountListMsg" role="status" aria-live="polite"></span></div>
       <div class="tbl-wrap" style="margin-top:8px">
         <table class="tbl account-tbl">
           <thead><tr><th>账号</th><th>登录方式</th><th>状态</th><th>操作</th></tr></thead>
@@ -58,7 +58,7 @@ const HTML = String.raw`
       </div>
       <div class="row" style="margin-top:12px">
         <button class="primary" id="accountSetSave" type="submit">保存</button>
-        <span class="tiny" id="accountSetMsg"></span>
+        <span class="tiny" id="accountSetMsg" role="status" aria-live="polite"></span>
       </div>
       <p class="hint" id="accountSetHint">单日上限与一次最多 1-200；间隔最小 5 秒，最大间隔不能小于最小间隔。非 admin 只能查看。</p>
     </form>
@@ -68,7 +68,7 @@ const HTML = String.raw`
       <label class="field" style="margin-top:10px"><span>确认清空</span><input id="accountClearConfirm" placeholder="输入：确认清空"></label>
       <div class="row" style="margin-top:10px">
         <button class="danger" id="accountClearBtn" type="button">清空派生数据</button>
-        <span class="tiny" id="accountClearMsg"></span>
+        <span class="tiny" id="accountClearMsg" role="status" aria-live="polite"></span>
       </div>
     </div>
   </div>
@@ -78,15 +78,15 @@ const HTML = String.raw`
   <div class="sec-head"><h2>词库管理</h2><span class="sub">采集页的关键词/评论筛选可以直接从词库导入；改动后 0.6 秒自动保存。</span></div>
   <div class="grid2">
     <div class="card account-lex">
-      <div class="row"><h3>搜索关键词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexKwMsg"></span><span class="badge" id="accountLexKwCount">0 个</span></div>
+      <div class="row"><h3>搜索关键词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexKwMsg" role="status" aria-live="polite"></span><span class="badge" id="accountLexKwCount">0 个</span></div>
       <div class="chips" id="accountLexKwChips"><span class="tiny">读取中…</span></div>
       <div class="row account-lex-add">
-        <input id="accountLexKwInput" autocomplete="off" placeholder="回车添加，可一次粘贴多个词">
+        <input id="accountLexKwInput" autocomplete="off" placeholder="回车添加，可一次粘贴多个词…">
         <button class="ghost sm" id="accountLexKwAdd" type="button">添加</button>
       </div>
       <div class="account-lex-bulk">
         <label class="field"><span>一键导入</span>
-          <textarea id="accountLexKwBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开"></textarea>
+          <textarea id="accountLexKwBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开…"></textarea>
         </label>
         <div class="row account-lex-foot">
           <button class="ghost sm" id="accountLexKwImport" type="button">导入</button>
@@ -95,15 +95,15 @@ const HTML = String.raw`
       </div>
     </div>
     <div class="card account-lex">
-      <div class="row"><h3>评论筛选词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexFlMsg"></span><span class="badge" id="accountLexFlCount">0 个</span></div>
+      <div class="row"><h3>评论筛选词库</h3><span class="spacer"></span><span class="tiny account-lex-msg" id="accountLexFlMsg" role="status" aria-live="polite"></span><span class="badge" id="accountLexFlCount">0 个</span></div>
       <div class="chips" id="accountLexFlChips"><span class="tiny">读取中…</span></div>
       <div class="row account-lex-add">
-        <input id="accountLexFlInput" autocomplete="off" placeholder="回车添加，如 广告 / 引流 / 加微">
+        <input id="accountLexFlInput" autocomplete="off" placeholder="回车添加，如 广告 / 引流 / 加微…">
         <button class="ghost sm" id="accountLexFlAdd" type="button">添加</button>
       </div>
       <div class="account-lex-bulk">
         <label class="field"><span>一键导入</span>
-          <textarea id="accountLexFlBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开"></textarea>
+          <textarea id="accountLexFlBulk" rows="2" placeholder="一次粘贴多个词，空格 / 斜杠 / 逗号 / 顿号 / 分号都能分开…"></textarea>
         </label>
         <div class="row account-lex-foot">
           <button class="ghost sm" id="accountLexFlImport" type="button">导入</button>
@@ -117,7 +117,7 @@ const HTML = String.raw`
 <section class="sec">
   <div class="sec-head"><h2>用户</h2><span class="sub">每个用户有独立的数据目录和独立登录态，互不可见。</span></div>
   <div class="card" id="accountUsersCard" hidden>
-    <div class="row"><h3>用户管理</h3><span class="spacer"></span><span class="tiny" id="accountUsersMsg"></span></div>
+    <div class="row"><h3>用户管理</h3><span class="spacer"></span><span class="tiny" id="accountUsersMsg" role="status" aria-live="polite"></span></div>
     <div class="tbl-wrap" style="margin-top:8px">
       <table class="tbl account-tbl">
         <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
@@ -125,18 +125,18 @@ const HTML = String.raw`
       </table>
     </div>
     <div class="row" id="accountPwReset" hidden style="margin-top:12px;align-items:flex-end">
-      <label class="field" style="flex:1;min-width:200px"><span>给 <b id="accountPwResetName">-</b> 设置新密码</span><input id="accountPwResetInput" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位"></label>
+      <label class="field" style="flex:1;min-width:200px"><span>给 <b id="accountPwResetName">-</b> 设置新密码</span><input id="accountPwResetInput" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位…"></label>
       <button class="primary" id="accountPwResetSave" type="button">保存</button>
       <button class="ghost" id="accountPwResetCancel" type="button">取消</button>
-      <span class="tiny" id="accountPwResetMsg"></span>
+      <span class="tiny" id="accountPwResetMsg" role="status" aria-live="polite"></span>
     </div>
     <form id="accountNewUser" class="grid3" style="margin-top:12px">
-      <label class="field"><span>用户名</span><input name="username" placeholder="小写字母数字 - _"></label>
-      <label class="field"><span>密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位"></label>
+      <label class="field"><span>用户名</span><input name="username" autocomplete="off" spellcheck="false" placeholder="小写字母数字 - _…"></label>
+      <label class="field"><span>密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位…"></label>
       <label class="field"><span>角色</span><select name="role"><option value="user">user</option><option value="admin">admin</option></select></label>
       <div class="row" style="grid-column:1/-1">
         <button class="primary" id="accountNewUserBtn" type="submit">新建用户</button>
-        <span class="tiny" id="accountNewUserMsg"></span>
+        <span class="tiny" id="accountNewUserMsg" role="status" aria-live="polite"></span>
       </div>
     </form>
   </div>
@@ -144,10 +144,10 @@ const HTML = String.raw`
     <div class="row"><h3>我的账号</h3><span class="spacer"></span><span class="tiny">当前用户 <b id="accountMeName">-</b></span></div>
     <form id="accountPwSelf" style="margin-top:10px">
       <div class="row" style="align-items:flex-end">
-        <label class="field" style="flex:1;min-width:200px"><span>新密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位"></label>
+        <label class="field" style="flex:1;min-width:200px"><span>新密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位…"></label>
         <button class="ghost" id="accountPwSelfBtn" type="submit">保存新密码</button>
       </div>
-      <p class="tiny" id="accountPwSelfMsg" style="margin-top:8px">改完要重新登录，其他设备上的会话也会失效。</p>
+      <p class="tiny" id="accountPwSelfMsg" style="margin-top:8px" role="status" aria-live="polite">改完要重新登录，其他设备上的会话也会失效。</p>
     </form>
   </div>
 </section>

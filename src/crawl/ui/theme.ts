@@ -134,6 +134,7 @@ button:disabled{opacity:.55;cursor:default}
 /* 移动端 */
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 @media(max-width:960px){
+  html{scroll-padding-top:56px}
   .app{grid-template-columns:1fr}
   .side{position:sticky;top:0;z-index:20;height:auto;flex-direction:row;overflow-x:auto;padding:var(--s2);gap:2px;border-right:0;border-bottom:1px solid var(--line)}
   .brand,.side-foot{display:none}

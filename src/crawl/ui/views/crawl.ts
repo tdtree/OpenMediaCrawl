@@ -130,7 +130,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
           </select>
         </label>
         <label class="field"><span>最多条数</span><input id="crawlMax" name="maxItems" type="number" min="1" step="1" value="20"></label>
-        <label class="field"><span>排序</span><input id="crawlSort" name="sort" placeholder="如 latest，可留空…"></label>
+        <label class="field"><span>排序</span><input id="crawlSort" name="sort" autocomplete="off" placeholder="如 latest，可留空…"></label>
         <label class="field req" id="crawlFieldIds" hidden><span>作品 ID / 链接</span><input id="crawlIds" name="ids" autocomplete="off" placeholder="逗号分隔，可整条粘贴…"></label>
         <label class="field req" id="crawlFieldCreators" hidden><span>博主 ID / 链接</span><input id="crawlCreators" name="creators" placeholder="逗号分隔，可粘主页链接…"></label>
         <div class="field req crawl-chip-field" id="crawlFieldKeywords">
@@ -159,8 +159,8 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
             <option value="sqlite">sqlite</option>
           </select>
         </label>
-        <label class="field"><span>间隔秒数</span><input id="crawlSleep" name="sleep" value="2-5" placeholder="2-5 或 3"></label>
-        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="20" placeholder="20（0 = 不限）"></label>
+        <label class="field"><span>间隔秒数</span><input id="crawlSleep" name="sleep" value="2-5" autocomplete="off" placeholder="2-5 或 3…"></label>
+        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="20" autocomplete="off" placeholder="20（0 = 不限）…"></label>
         <div class="field crawl-wide"><span>附加</span>
           <div class="crawl-checks">
             <label class="check"><input type="checkbox" id="crawlOptComments" checked> 评论</label>
@@ -176,7 +176,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       <span class="hint crawl-hint">中断后重跑同一条命令：跑完的关键词整段跳过，没跑完的从上次翻页的位置继续。</span>
       <button class="primary" id="crawlStart" type="submit">开始采集</button>
     </div>
-    <p class="crawl-msg" id="crawlFormMsg"></p>
+    <p class="crawl-msg" id="crawlFormMsg" role="status" aria-live="polite"></p>
   </form>
 </section>
 
@@ -195,7 +195,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       <div class="empty"><b>还没选作品</b><span class="sub">在左边列表点一条作品，这里显示标题、统计和评论。</span></div>
     </div>
   </div>
-  <p class="crawl-msg" id="crawlRecMsg"></p>
+  <p class="crawl-msg" id="crawlRecMsg" role="status" aria-live="polite"></p>
 </section>
 `,
   js: String.raw`

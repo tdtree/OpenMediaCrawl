@@ -15,10 +15,13 @@ export const reach: View = {
 
   css: String.raw`
 .reach-bar{margin-bottom:var(--s2)}
-.reach-f2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s2)}
+.reach-f3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s2)}
+@media(max-width:640px){.reach-f3{grid-template-columns:1fr}}
 .reach-tpl{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
 .reach-tpl select{flex:0 1 220px;min-width:150px}
 .reach-tpl input{flex:1 1 180px;min-width:120px}
+.reach-camp-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s1) var(--s3)}
+.reach-camp-meta .hint{margin:0;flex:1 1 260px;min-width:0}
 .reach-form{display:flex;flex-direction:column;gap:var(--s3);margin-top:var(--s3)}
 .reach-pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:var(--s2) var(--s3);margin:var(--s2) 0 0;min-height:96px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:var(--fs-xs);line-height:1.7;color:var(--fg)}
 .tbl tbody tr.reach-logrow:hover td{background:transparent}
@@ -120,38 +123,40 @@ export const reach: View = {
         <span>去采集页，在评论上点「加候选」；回复候选会记下那条评论，私信候选会记下评论作者。</span>
         <div><button class="btn ghost sm" id="reachGoCrawl" type="button">去采集页</button></div>
       </div>
-      <p class="hint" id="reachCandMsg" hidden></p>
+      <p class="hint" id="reachCandMsg" hidden role="status" aria-live="polite"></p>
     </div>
 
     <div class="card">
       <h2>群发设置</h2>
       <form id="reachCampForm" class="reach-form">
-        <label class="field"><span>类型</span>
-          <select id="reachCampType">
-            <option value="dm" selected>统一私信</option>
-            <option value="reply">统一回复（回复他们那条评论）</option>
-          </select>
-        </label>
+        <div class="reach-f3">
+          <label class="field"><span>类型</span>
+            <select id="reachCampType">
+              <option value="dm" selected>统一私信</option>
+              <option value="reply">统一回复（回复他们那条评论）</option>
+            </select>
+          </label>
+          <label class="field"><span>最小间隔（秒）</span><input id="reachCampMin" type="number" min="5" step="1" value="30" autocomplete="off"></label>
+          <label class="field"><span>最大间隔（秒）</span><input id="reachCampMax" type="number" min="5" step="1" value="90" autocomplete="off"></label>
+        </div>
         <label class="field"><span>文案</span>
-          <textarea id="reachCampText" rows="4" maxlength="500" placeholder="要群发的文字，最多 500 字"></textarea>
+          <textarea id="reachCampText" rows="3" maxlength="500" placeholder="要群发的文字，最多 500 字…"></textarea>
         </label>
         <div class="reach-tpl">
           <select id="reachTplPick" aria-label="已存话术"><option value="">选择已存话术…</option></select>
-          <input id="reachTplName" maxlength="40" placeholder="人群/场景，如：宝妈-低价款">
+          <input id="reachTplName" maxlength="40" autocomplete="off" aria-label="话术名称（人群或场景）" placeholder="人群/场景，如：宝妈-低价款…">
           <button class="ghost sm" id="reachTplSave" type="button">存为话术</button>
           <button class="ghost sm" id="reachTplDel" type="button">删除</button>
         </div>
-        <div class="reach-f2">
-          <label class="field"><span>最小间隔（秒）</span><input id="reachCampMin" type="number" min="5" step="1" value="30"></label>
-          <label class="field"><span>最大间隔（秒）</span><input id="reachCampMax" type="number" min="5" step="1" value="90"></label>
+        <div class="reach-camp-meta">
+          <p class="tiny" id="reachCampMeta">已选 0 / 可发 0 / 单日上限 -</p>
+          <p class="hint" id="reachCampHint">服务端会跳过今天已经发过的和超上限的，遇到风控或登录失效会自动停；上限与间隔由 admin 在「账号与设置」统一设置。</p>
         </div>
-        <p class="tiny" id="reachCampMeta">已选 0 / 可发 0 / 单日上限 -</p>
         <div class="row">
           <button class="primary" id="reachCampStart" type="submit">开始群发</button>
           <button class="danger" id="reachCampStop" type="button" hidden>停止</button>
-          <span class="tiny" id="reachCampMsg"></span>
+          <span class="tiny" id="reachCampMsg" role="status" aria-live="polite"></span>
         </div>
-        <p class="hint" id="reachCampHint">服务端会跳过今天已经发过的和超上限的，遇到风控或登录失效会自动停。单日上限、一次最多和间隔由 admin 在「账号与设置」里统一设置。</p>
         <pre class="reach-pre mono" id="reachCampLog" hidden></pre>
       </form>
     </div>
@@ -178,7 +183,7 @@ export const reach: View = {
     <span>去采集页提交一次采集，任务进度和日志会出现在这里。</span>
     <div><button class="btn ghost sm" id="reachJobsGoCrawl" type="button">去采集页</button></div>
   </div>
-  <p class="hint" id="reachJobsMsg" hidden></p>
+  <p class="hint" id="reachJobsMsg" hidden role="status" aria-live="polite"></p>
 </section>
 
 <section class="sec">
@@ -193,17 +198,17 @@ export const reach: View = {
       </label>
       <label class="field"><span>平台</span><select id="reachActPlatform"></select></label>
       <label class="field"><span id="reachActTargetLabel">作品 ID / 链接</span>
-        <input id="reachActTarget" placeholder="评论发到这个作品">
+        <input id="reachActTarget" autocomplete="off" placeholder="评论发到这个作品…">
       </label>
       <label class="field" id="reachActReplyField"><span>回复评论 ID（可选）</span>
-        <input id="reachActReplyTo" placeholder="要回复的那条评论">
+        <input id="reachActReplyTo" autocomplete="off" placeholder="要回复的那条评论…">
       </label>
       <label class="field full"><span>内容</span>
-        <input id="reachActText" maxlength="500" placeholder="要发送的文字，最多 500 字">
+        <input id="reachActText" maxlength="500" autocomplete="off" placeholder="要发送的文字，最多 500 字…">
       </label>
       <div class="row full">
         <button class="primary" id="reachActSend" type="submit">发送（会二次确认）</button>
-        <span class="tiny" id="reachActMsg"></span>
+        <span class="tiny" id="reachActMsg" role="status" aria-live="polite"></span>
       </div>
     </form>
   </details>
@@ -225,7 +230,7 @@ export const reach: View = {
       </div>
       <div class="reach-thread-list" id="reachThreadList"></div>
       <div class="empty reach-th-empty" id="reachThreadEmpty" hidden></div>
-      <p class="hint" id="reachThreadsMsg" hidden></p>
+      <p class="hint" id="reachThreadsMsg" hidden role="status" aria-live="polite"></p>
     </div>
 
     <div class="card reach-chat-main">
@@ -243,7 +248,7 @@ export const reach: View = {
         <div class="empty reach-msgs-empty" id="reachChatEmpty" hidden></div>
       </div>
       <form class="reach-composer" id="reachChatForm">
-        <textarea id="reachChatText" rows="2" maxlength="500" placeholder="先在左边选一个会话" disabled></textarea>
+        <textarea id="reachChatText" rows="2" maxlength="500" placeholder="先在左边选一个会话…" disabled></textarea>
         <div class="reach-comp-bar">
           <span class="tiny num" id="reachChatCount">0 / 500</span>
           <span class="tiny">Enter 发送，Shift+Enter 换行</span>
