@@ -529,6 +529,24 @@ describe('web UI', () => {
         body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'i1', items: [{ commentId: 'c1', userId: 'u1', userName: '张三' }, { commentId: 'c2', userId: 'u2' }] }),
       })).json() as { added: number; skipped: number }
       expect(bulk).toMatchObject({ added: 2, skipped: 0 })
+
+      // 群发话术：存多套、按 id 删
+      const tpl0 = await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json() as { items: unknown[] }
+      expect(tpl0.items).toEqual([])
+      const tplSave = await (await fetch(`${base}/api/templates`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ name: '宝妈-低价款', text: '宝妈看这里，39 元两件' }),
+      })).json() as { created: boolean; template: { id: string; name: string; text: string } }
+      expect(tplSave.created).toBe(true)
+      const tplList = await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json() as { items: Array<{ id: string; name: string; text: string }> }
+      expect(tplList.items).toHaveLength(1)
+      expect(tplList.items[0]).toMatchObject({ name: '宝妈-低价款', text: '宝妈看这里，39 元两件' })
+      const tplDel = await (await fetch(`${base}/api/templates`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ action: 'delete', id: tplSave.template.id }),
+      })).json() as { deleted: boolean }
+      expect(tplDel.deleted).toBe(true)
+      expect(((await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json()) as { items: unknown[] }).items).toEqual([])
     } finally { await ui.close() }
   })
 

@@ -16,6 +16,9 @@ export const reach: View = {
   css: String.raw`
 .reach-bar{margin-bottom:var(--s2)}
 .reach-f2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s2)}
+.reach-tpl{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.reach-tpl select{flex:0 1 220px;min-width:150px}
+.reach-tpl input{flex:1 1 180px;min-width:120px}
 .reach-form{display:flex;flex-direction:column;gap:var(--s3);margin-top:var(--s3)}
 .reach-pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:var(--s2) var(--s3);margin:var(--s2) 0 0;min-height:96px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:var(--fs-xs);line-height:1.7;color:var(--fg)}
 .tbl tbody tr.reach-logrow:hover td{background:transparent}
@@ -132,6 +135,12 @@ export const reach: View = {
         <label class="field"><span>文案</span>
           <textarea id="reachCampText" rows="4" maxlength="500" placeholder="要群发的文字，最多 500 字"></textarea>
         </label>
+        <div class="reach-tpl">
+          <select id="reachTplPick" aria-label="已存话术"><option value="">选择已存话术…</option></select>
+          <input id="reachTplName" maxlength="40" placeholder="人群/场景，如：宝妈-低价款">
+          <button class="ghost sm" id="reachTplSave" type="button">存为话术</button>
+          <button class="ghost sm" id="reachTplDel" type="button">删除</button>
+        </div>
         <div class="reach-f2">
           <label class="field"><span>最小间隔（秒）</span><input id="reachCampMin" type="number" min="5" step="1" value="30"></label>
           <label class="field"><span>最大间隔（秒）</span><input id="reachCampMax" type="number" min="5" step="1" value="90"></label>
@@ -452,6 +461,66 @@ async function reachLoadSettings(){
   }catch(e){
     reachShow($('#reachCampMsg'),'设置读取失败：'+e.message);
   }
+}
+
+/* ---------------------------------------------------------------- 话术模板 */
+var reachTpls=[];
+
+function reachTplFind(id){
+  for(var i=0;i<reachTpls.length;i++)if(reachTpls[i].id===id)return reachTpls[i];
+  return null;
+}
+
+function reachRenderTpls(selectedId){
+  var sel=$('#reachTplPick');if(!sel)return;
+  var html='<option value="">选择已存话术…</option>';
+  for(var i=0;i<reachTpls.length;i++)html+='<option value="'+esc(reachTpls[i].id)+'">'+esc(reachTpls[i].name)+'</option>';
+  sel.innerHTML=html;
+  sel.value=selectedId&&reachTplFind(selectedId)?selectedId:'';
+}
+
+async function reachLoadTpls(selectedId){
+  try{
+    var r=await api('/api/templates');
+    reachTpls=r.items||[];
+    reachRenderTpls(selectedId);
+  }catch(e){/* 话术只是辅助，加载失败不影响群发，下拉保持为空 */}
+}
+
+function reachApplyTpl(){
+  var sel=$('#reachTplPick');if(!sel)return;
+  var t=reachTplFind(sel.value);
+  if(!t)return;
+  $('#reachCampText').value=t.text;
+  if($('#reachTplName'))$('#reachTplName').value=t.name;
+  reachSetCampMsg('已套用话术「'+t.name+'」，可以直接改再发');
+}
+
+async function reachSaveTpl(){
+  var text=$('#reachCampText').value.trim();
+  if(!text){toast('先写文案，再存为话术','err');$('#reachCampText').focus();return}
+  if(text.length>500){toast('文案最多 500 字','err');return}
+  var name=($('#reachTplName').value||'').trim()||text.slice(0,20);
+  try{
+    var r=await post('/api/templates',{name:name,text:text});
+    await reachLoadTpls(r.template.id);
+    if($('#reachTplName'))$('#reachTplName').value=r.template.name;
+    toast(r.created?'已存为话术「'+r.template.name+'」':'已更新话术「'+r.template.name+'」','ok');
+  }catch(e){toast('保存话术失败：'+e.message,'err')}
+}
+
+async function reachDeleteTpl(){
+  var sel=$('#reachTplPick');if(!sel)return;
+  var t=reachTplFind(sel.value);
+  if(!t){toast('先在下拉里选一个话术','err');return}
+  if(!confirm('删除话术「'+t.name+'」？已经填在文案里的内容不会变。'))return;
+  try{
+    var r=await post('/api/templates',{action:'delete',id:t.id});
+    await reachLoadTpls('');
+    if($('#reachTplName'))$('#reachTplName').value='';
+    reachSetCampMsg('');
+    toast(r.deleted?'已删除话术「'+t.name+'」':'话术已经不在了',r.deleted?'ok':'err');
+  }catch(e){toast('删除话术失败：'+e.message,'err')}
 }
 
 /* ---------------------------------------------------------------- 群发 + SSE */
@@ -1125,6 +1194,9 @@ async function reachChatRefresh(){
 
 /* ---------------------------------------------------------------- 绑定与注册 */
 $('#reachCampForm').onsubmit=reachStartCampaign;
+if($('#reachTplPick'))$('#reachTplPick').onchange=reachApplyTpl;
+if($('#reachTplSave'))$('#reachTplSave').onclick=reachSaveTpl;
+if($('#reachTplDel'))$('#reachTplDel').onclick=reachDeleteTpl;
 $('#reachCampStop').onclick=reachStopCampaign;
 $('#reachCampType').onchange=reachUpdateMeta;
 $('#reachCandBulk').onclick=reachRemoveSelected;
@@ -1185,6 +1257,7 @@ document.addEventListener('click',function(ev){
         reachLoadCandidates();
         reachLoadJobs();
         reachLoadSettings();
+        reachLoadTpls();
         if(reachTabCur==='chat')reachLoadThreads();
       },0);
       return;
@@ -1201,6 +1274,7 @@ omc.hook('openChat',function(x){if(x&&x.platform&&x.peerId)reachOpenChat(x.platf
 omc.onShow('reach',function(){
   reachLoadActionPlatforms();
   reachLoadSettings();
+  reachLoadTpls();
   reachLoadCandidates();
   reachLoadJobs();
   if(reachTabCur==='chat')reachLoadThreads();

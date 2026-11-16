@@ -24,6 +24,7 @@ import { loadSharedConfig, parseRefresh, policyFrom, sharedEnabled } from './sha
 import { DEFAULT_SEND_CONFIG, loadSendConfig, saveSendConfig } from './send-config.js'
 import { summarize } from './stats.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
+import { deleteTemplate, listTemplates, saveTemplate } from './templates.js'
 import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
 import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, usersFilePath, verifyUser, type Role, type UserStatus } from './users.js'
 import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, restoreSessions, sessionCookie } from './sessions.js'
@@ -990,6 +991,21 @@ export async function startUiServer(options: { port?: number; host?: string; out
     const candidateMatch = url.pathname.match(/^\/api\/candidates\/([^/]+)$/)
     if (candidateMatch && req.method === 'DELETE') {
       return (await removeCandidate(root, candidateMatch[1]!)) ? json(res, { ok: true }) : json(res, { error: 'not found' }, 404)
+    }
+
+    if (url.pathname === '/api/templates' && req.method === 'GET') {
+      return json(res, { items: await listTemplates(root) })
+    }
+    if (url.pathname === '/api/templates' && req.method === 'POST') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      if (input.action === 'delete') {
+        return json(res, { deleted: await deleteTemplate(root, String(input.id ?? '')) })
+      }
+      try {
+        const result = await saveTemplate(root, { id: input.id ? String(input.id) : undefined, name: String(input.name ?? ''), text: String(input.text ?? '') })
+        return json(res, result)
+      } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/campaigns') {
