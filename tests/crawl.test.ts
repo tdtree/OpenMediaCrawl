@@ -574,6 +574,28 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('deletes a platform account and clears the current pointer', async () => {
+    const { out, ui, base } = await uiServer('omc-acct-del-')
+    try {
+      const cookie = await signIn(base)
+      const dir = join(out, 'users', 'admin', '.catbus', 'auth', 'douyin', 'web')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'default.json'), JSON.stringify({ method: 'cookie', user: { name: '墙左墙右' } }) + '\n')
+      await writeFile(join(dir, '_current'), 'default\n')
+      const before = await (await fetch(`${base}/api/accounts?platform=douyin`, { headers: { cookie } })).json() as { accounts: Array<{ account: string; current: boolean }> }
+      expect(before.accounts).toHaveLength(1)
+      expect(before.accounts[0]).toMatchObject({ account: 'default', current: true })
+      const removed = await (await fetch(`${base}/api/accounts/delete`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ platform: 'douyin', account: 'default' }),
+      })).json() as { ok: boolean }
+      expect(removed.ok).toBe(true)
+      const after = await (await fetch(`${base}/api/accounts?platform=douyin`, { headers: { cookie } })).json() as { accounts: unknown[] }
+      expect(after.accounts).toEqual([])
+      await expect(readFile(join(dir, '_current'), 'utf8')).rejects.toThrow()
+    } finally { await ui.close() }
+  })
+
   it('registers a real-name account, blocks it until approved, and lets admin reset the password', async () => {
     const { ui, base } = await uiServer('omc-ui-reg-')
     const login = (username: string, password: string) => fetch(`${base}/api/login`, {

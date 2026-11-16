@@ -43,6 +43,7 @@
 - 账号页「粘贴 Cookie」拆成 Cookie / ts_sign / ticket / client_cert / 私钥 五个输入：只填 Cookie 仍只能采集，把 localStorage 的 `ec_privateKey` 填进私钥即可补写权限，前端自动组装成 JSON 提交；也支持直接粘完整 JSON
 - 本机一键抓取抖音凭证：控制台直接下发零依赖抓取工具（`/api/capture/dy-capture.mjs` + 生成 `capture-douyin.bat`），普通用户不需要仓库或 npm，只要 Node.js 22+ 和 Chrome；扫码后自动抓 `cookie / ticket / ts_sign / client_cert / private_key` 生成用户目录下的 `dy.json`，账号页「导入 dy.json」自动填五个输入。开发机仍可用 `npm run capture:douyin`（puppeteer-core 版）
 - 触达 → 候选池支持「手动添加测试号」：填平台 + UID / sec_uid / 主页链接即可加入私信候选（不绑定作品），群发前可先给自己的小号发一条验证收信；重复添加只算一次
+- 账号与设置 → 账号列表每行新增「删除」：确认后只删本地这份登录态（`auth/<平台>/web/<账号>.json`）；删的是当前账号时一并清掉 `_current`，平台上的账号不受影响。删除后列表即时刷新
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

@@ -179,6 +179,7 @@ const CSS = String.raw`
 .account-cookie>summary::marker{content:""}
 .account-danger{border-color:color-mix(in srgb,var(--danger) 32%,var(--line))}
 .account-danger h3{color:var(--danger)}
+.account-ops{display:inline-flex;align-items:center;gap:6px}
 .account-tbl td{vertical-align:middle}
 .account-tbl td .row{flex-wrap:nowrap}
 .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-top:var(--s3);min-height:32px}
@@ -326,6 +327,19 @@ async function accountLoadPlatforms(){
   }
 }
 
+async function accountDeleteAccount(name){
+  var p=$('#accountPlatform').value;
+  if(!p)return;
+  if(!confirm('删除账号「'+name+'」？\n\n只删本地这份登录态，平台上的账号不受影响；删除后要重新扫码或导入才能再用。'))return;
+  try{
+    await post('/api/accounts/delete',{platform:p,account:name});
+    toast('已删除账号「'+name+'」','ok');
+    await accountLoadAccounts();
+  }catch(e){
+    $('#accountListMsg').textContent='删除失败：'+e.message;
+  }
+}
+
 async function accountLoadAccounts(){
   var tb=$('#accountList');if(!tb)return;
   var p=$('#accountPlatform').value;
@@ -352,13 +366,14 @@ async function accountLoadAccounts(){
         '<td data-label="账号"><div>'+esc(who)+'</div>'+raw+'</td>'+
         '<td data-label="登录方式">'+(a.method?'<span class="badge">'+esc(a.method)+'</span>':'<span class="tiny">-</span>')+'</td>'+
         '<td data-label="状态">'+(a.current?'<span class="badge ok">当前</span>':'<span class="badge">备选</span>')+'</td>'+
-        '<td data-label="操作">'+(a.current?'<span class="tiny">使用中</span>':'<button class="sm" type="button" data-account-use="'+esc(a.account)+'">切换为当前</button>')+'</td>'+
+        '<td data-label="操作"><span class="account-ops">'+(a.current?'<span class="tiny">使用中</span>':'<button class="sm" type="button" data-account-use="'+esc(a.account)+'">切换为当前</button>')+'<button class="sm danger" type="button" data-platform-account-del="'+esc(a.account)+'">删除</button></span></td>'+
         '</tr>';
     }).join('');
     tb.dataset.loaded='1';
     var current=list.filter(function(a){return a.current})[0];
     $('#accountListMsg').textContent='共 '+list.length+' 个账号'+(current?('，当前 '+(current.user&&current.user.name?current.user.name:current.account)):'');
     $$('button[data-account-use]',tb).forEach(function(b){b.onclick=function(){accountUse(b)}});
+    $$('button[data-platform-account-del]',tb).forEach(function(b){b.onclick=function(){accountDeleteAccount(b.getAttribute('data-platform-account-del'))}});
   }catch(e){
     $('#accountAccMsg').textContent='账号列表读取失败：'+e.message;
     if(!tb.dataset.loaded)tb.innerHTML='<tr><td colspan="4"><p class="empty">'+esc(e.message)+'</p></td></tr>';

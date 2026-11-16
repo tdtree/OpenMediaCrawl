@@ -294,6 +294,16 @@ export async function startUiServer(options: { port?: number; host?: string; out
     return accounts
   }
 
+  /** 删除某平台某账号的本地登录态；当前账号被删时一并清掉 _current。 */
+  async function deleteUserAccount(home: string, platform: string, account: string): Promise<void> {
+    if (!ACCOUNT_RE.test(account) || account === 'guest') throw new Error('账号名不合法')
+    const dir = join(home, 'auth', platform, 'web')
+    await rm(join(dir, `${account}.json`), { force: true })
+    try {
+      if ((await readFile(join(dir, '_current'), 'utf8')).trim() === account) await rm(join(dir, '_current'), { force: true })
+    } catch {}
+  }
+
   /** 把固定路径的二维码复制成这次 login 专属的一份；页面只显示自己这次登录的码。 */
   async function snapshotQr(login: LoginJob): Promise<number | null> {
     const dir = join(login.home, 'cache', login.platform)
@@ -419,6 +429,18 @@ export async function startUiServer(options: { port?: number; host?: string; out
       await mkdir(dir, { recursive: true })
       await writeFile(join(dir, '_current'), account + '\n', 'utf8')
       return json(res, { ok: true, platform, account })
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/accounts/delete') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const account = String(input.account ?? '')
+      if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
+      try {
+        await deleteUserAccount(home, platform, account)
+        return json(res, { ok: true, platform, account })
+      } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/login/start') {
