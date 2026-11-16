@@ -41,6 +41,7 @@
 - Web 镜像（`OMC_WEB_IMAGE=1`）缺验证码模型时 `doctor` 显示「未安装模型」但不再判失败；CLI 镜像仍按故障处理
 - 控制台 UI 规范审查收尾：18 处状态提示补 `role=status` / `aria-live`、话术名称补 `aria-label`、二维码图补 `width/height`、非登录输入框关闭自动填充、文本框占位符统一以 `…` 结尾；群发设置重排为「类型 + 间隔」一行、文案 3 行，1440 宽表单高度 443→312px，390 宽无横向溢出
 - 账号页「粘贴 Cookie」拆成 Cookie / ts_sign / ticket / client_cert / 私钥 五个输入：只填 Cookie 仍只能采集，把 localStorage 的 `ec_privateKey` 填进私钥即可补写权限，前端自动组装成 JSON 提交；也支持直接粘完整 JSON
+- 本机一键抓取抖音凭证：`scripts/dy-capture.mjs` + `npm run capture:douyin`，打开独立 Chrome 扫码，自动抓 `cookie / ticket / ts_sign / client_cert / private_key` 生成 `dy.json`；账号页新增「导入 dy.json」自动填五个输入。抓取依赖 `puppeteer-core`，只能在有 Chrome 的本机跑，Docker 里不可用
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

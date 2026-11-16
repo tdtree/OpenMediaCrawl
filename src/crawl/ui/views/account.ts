@@ -33,8 +33,11 @@ const HTML = String.raw`
         <p class="hint">只填 Cookie 只能采集。要发私信 / 评论 / 发布，把浏览器 localStorage 里 <code>security-sdk/s_sdk_crypt_sdk</code> 的 <code>ec_privateKey</code> 粘到私钥，再把同一次登录的 ts_sign / ticket / client_cert 填上；也可以直接粘完整 JSON。取法见 docs/guide/login.md。</p>
         <div class="row" style="margin-top:8px">
           <button class="ghost" id="accountCookieBtn" type="button">用 Cookie 登录</button>
+          <button class="ghost sm" id="accountImportBtn" type="button">导入 dy.json</button>
+          <input id="accountImportFile" type="file" accept=".json,application/json" hidden>
           <span class="tiny" id="accountCookieMsg" role="status" aria-live="polite"></span>
         </div>
+        <p class="hint">dy.json 用本机 <code>npm run capture:douyin</code> 生成（打开 Chrome 扫码，自动抓 5 项）。容器里跑不了，需在装了 Chrome 的电脑上执行。</p>
       </details>
       <div class="account-qr" id="accountQrBox" hidden>
         <img id="accountQrImg" alt="登录二维码" width="220" height="220" loading="lazy">
@@ -844,6 +847,28 @@ $('#accountScanBtn').onclick=function(){
   var p=$('#accountPlatform').value;
   if(!p){$('#accountAccMsg').textContent='先选平台';return}
   accountStartLogin({platform:p},this);
+};
+
+$('#accountImportBtn').onclick=function(){var f=$('#accountImportFile');if(f)f.click()};
+$('#accountImportFile').onchange=async function(){
+  var file=this.files&&this.files[0];
+  if(!file)return;
+  try{
+    var data=JSON.parse(await file.text());
+    if(!data.cookie)throw new Error('JSON 里没有 cookie 字段');
+    $('#accountCookie').value=data.cookie||'';
+    if($('#accountPrivateKey'))$('#accountPrivateKey').value=data.private_key||'';
+    if($('#accountTsSign'))$('#accountTsSign').value=data.ts_sign||'';
+    if($('#accountTicket'))$('#accountTicket').value=data.ticket||'';
+    if($('#accountClientCert'))$('#accountClientCert').value=data.client_cert||'';
+    if($('#accountPlatform'))$('#accountPlatform').value='douyin';
+    var n=['cookie','private_key','ts_sign','ticket','client_cert'].filter(function(k){return data[k]}).length;
+    $('#accountCookieMsg').textContent='已导入 '+n+' 项（平台已切到抖音），点「用 Cookie 登录」';
+    toast('已导入 dy.json','ok');
+  }catch(e){
+    $('#accountCookieMsg').textContent='导入失败：'+e.message;
+  }
+  this.value='';
 };
 
 $('#accountCookieBtn').onclick=function(){

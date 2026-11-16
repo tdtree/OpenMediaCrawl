@@ -162,6 +162,22 @@ catbus douyin auth login --method cookie --cookie @dy.json
 
 **已知问题**：目前即使凭证齐全，抖音的发布仍返回空响应（上游同样失败），点赞在缺设备素材时还会导致登录态被踢。详见 [抖音的已知限制](../platforms/douyin.md#已知限制)。
 
+#### 一键抓取（本机 Chrome）
+
+本机装了 Chrome 时，不用手动翻 localStorage 和 Network：
+
+```bash
+npm run capture:douyin
+```
+
+脚本会打开一个独立的 Chrome 配置目录 `.chrome-dy`，首次在窗口里扫码登录；登录过程中同时从网络响应和 `crypto.subtle` 取 `cookie / ticket / ts_sign / client_cert / private_key`，抓齐 5 项自动退出并生成 `dy.json`。
+然后到 账号与设置 → 粘贴 Cookie → 「导入 dy.json」→ 确认平台 → 「用 Cookie 登录」。
+
+- `DY_FRESH=1 npm run capture:douyin`：清掉旧登录态重新扫码
+- `CHROME_PATH=...`、`DY_OUT=...`、`DY_TIMEOUT_MS=...` 可覆盖默认
+- 必须在本机（有 Chrome、能弹窗）运行；Docker 容器里没有浏览器，跑不了
+- `dy.json` 含私钥，别提交、别外传；仓库 `.gitignore` 已忽略
+
 #### 不想重扫：从已登录浏览器取私钥
 
 私钥不是扫码接口下发的，而是网页登录时由 security-sdk 在本地生成，存在浏览器的 localStorage 里。账号在某个浏览器里还登着，就能把私钥和 ts_sign 取出来，补进凭证，不用再扫一次：

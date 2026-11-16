@@ -35,3 +35,9 @@ var/
 
 # CodeGraph 的本地索引（可用 codegraph init 重建）
 .codegraph/
+
+# 本机抓取抖音凭证的产物（含私钥，绝不入库）
+dy.json
+.env.part
+.chrome-dy/
+dump/
