@@ -93,7 +93,7 @@ docker run -d --name omc   -p 8080:8080   -v omc-data:/data   -e OMC_ADMIN_PASSW
 - 打开 `http://<机器IP>:8080`，用 `admin` + `OMC_ADMIN_PASSWORD` 登录；没设这个变量时密码会随机生成并打印在 `docker logs omc` 里。
 - 数据都在卷 `/data`：`/data/omc/users.json`（账号与审核状态）+ `/data/output/users/<用户名>/`（作品、评论、线索、发送记录、登录态）。备份这个卷即可整体迁移。
 - 镜像内监听 `0.0.0.0:8080`；`EXPOSE 8080` 已声明，健康检查每 30 秒打一次 `/`。
-- 镜像不含京东验证码 / OCR 模型（这两个平台在 Web 版里会报缺模型）；需要这些能力请用 CLI 镜像。
+- 镜像不含京东验证码 / OCR 模型（Web 镜像设了 `OMC_WEB_IMAGE=1`，`doctor` 里这两项显示「未安装模型」但不算故障）；需要这些能力请用 CLI 镜像。
 - 镜像必须带 `static/`（平台签名脚本与抖音风控 profile）。`Dockerfile.web` 已 `COPY static static`；
   老镜像漏了这一层时，**抖音扫码登录会报** `ENOENT: no such file or directory, open '/app/static/douyin/challenge_profile.json'`。
   修法二选一：

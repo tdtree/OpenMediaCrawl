@@ -31,7 +31,8 @@ LABEL org.opencontainers.image.title="OpenMediaCrawl Web" \
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
     OMC_HOME=/data/omc \
-    OMC_UI_HOST=0.0.0.0
+    OMC_UI_HOST=0.0.0.0 \
+    OMC_WEB_IMAGE=1
 
 WORKDIR /app
 COPY --from=build /src/package.json ./

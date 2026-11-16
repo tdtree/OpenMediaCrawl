@@ -137,11 +137,7 @@ export async function doctor(): Promise<Check[]> {
       const { models } = await import('@cv-cat/catbus-assets-jd').catch(() => {
         throw new Error(`没有安装 ${name}，请重新安装 catbus-cli`)
       })
-      for (const file of Object.values(models)) {
-        const s = await stat(file).catch(() => null)
-        if (!s?.size) throw new Error(`模型文件缺失：${file}`)
-      }
-      return `${name} ${installedVersion(name)}`
+      return await assetsMessage(name, models)
     }),
 
     await check('assets-ocr', async () => {
@@ -149,11 +145,29 @@ export async function doctor(): Promise<Check[]> {
       const { models } = await import('@cv-cat/catbus-assets-ocr').catch(() => {
         throw new Error(`没有安装 ${name}，请重新安装 catbus-cli`)
       })
-      for (const file of Object.values(models)) {
-        const s = await stat(file).catch(() => null)
-        if (!s?.size) throw new Error(`模型文件缺失：${file}`)
-      }
-      return `${name} ${installedVersion(name)}`
+      return await assetsMessage(name, models)
     }),
   ]
+}
+
+/**
+ * 验证码模型是可选能力：
+ * - Web 镜像故意不带模型（体积小），整个 models 目录都不存在 → 算「未安装」，不算故障；
+ * - 目录在、文件缺 → 真的坏了（构建/解压出错），必须报失败；
+ * - 文件齐 → 正常。
+ */
+async function assetsMessage(name: string, models: Record<string, string>): Promise<string> {
+  const files = Object.values(models)
+  const missing: string[] = []
+  for (const file of files) {
+    const info = await stat(file).catch(() => null)
+    if (!info?.size) missing.push(file)
+  }
+  if (!missing.length) return `${name} ${installedVersion(name)}`
+  // 只有 Web 镜像（Dockerfile.web 设了 OMC_WEB_IMAGE=1）才把「没有模型」当可选；
+  // CLI 镜像缺模型仍然算故障，否则京东/淘宝验证码会在运行时才炸。
+  if (process.env.OMC_WEB_IMAGE === '1') {
+    return `${name} ${installedVersion(name)}（未安装模型；Web 镜像不含，京东/淘宝验证码相关功能不可用）`
+  }
+  throw new Error(`模型文件缺失：${missing[0]}`)
 }
