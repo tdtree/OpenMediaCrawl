@@ -1,5 +1,6 @@
 import { CatbusError } from '../../../core/errors.js'
 import type { LocalMedia } from '../../../core/files.js'
+import type { HttpResponse } from '../../../core/http.js'
 import { compactJson, jsonLoads, parseQsl, urlencode } from '../../../core/py.js'
 import * as rand from '../../../core/rand.js'
 import { type Douyin, type DyJson, riskJson } from './client.js'
@@ -75,6 +76,65 @@ export interface Conversation {
   ticket: string
 }
 
+/** 从畸形/非 protobuf 响应里尽量扫出可读字符串，便于定位服务端到底返回了什么。 */
+function protoStrings(buf: Uint8Array): string[] {
+  const out: string[] = []
+  let pos = 0
+  const varint = (): number => {
+    let value = 0
+    let shift = 0
+    while (pos < buf.length) {
+      const b = buf[pos++]!
+      value += (b & 0x7f) * 2 ** shift
+      if (!(b & 0x80)) return value
+      shift += 7
+      if (shift > 49) throw new Error('varint')
+    }
+    throw new Error('varint')
+  }
+  try {
+    while (pos < buf.length) {
+      const key = varint()
+      const wire = key & 7
+      if (wire === 0) varint()
+      else if (wire === 1) pos += 8
+      else if (wire === 5) pos += 4
+      else if (wire === 2) {
+        const len = varint()
+        if (len < 0 || pos + len > buf.length) break
+        const s = Buffer.from(buf.subarray(pos, pos + len)).toString('utf8')
+        pos += len
+        if (/^[\x20-\x7e\u4e00-\u9fa5]{4,}$/.test(s)) out.push(s)
+      } else break
+      if (out.length >= 6) break
+    }
+  } catch {}
+  return out
+}
+
+/** IM 的响应不一定是 protobuf：风控/参数错误常直接回 JSON 或空体，先按内容类型分流。 */
+export async function decodeImResponse(res: HttpResponse, what: string): Promise<any> {
+  const buf = new Uint8Array(await res.arrayBuffer())
+  const ct = res.headers.get('content-type') || ''
+  const logid = res.headers.get('x-tt-logid') || res.headers.get('x-tt-log-id') || ''
+  const text = Buffer.from(buf).toString('utf8')
+  const printable = /^[\x09\x0a\x0d\x20-\x7e\u4e00-\u9fa5]*$/.test(text)
+  if (!res.ok || /json|text/i.test(ct)) {
+    const snippet = printable ? text.trim().slice(0, 300) : ''
+    throw new CatbusError('UPSTREAM', `${what}失败：HTTP ${res.status}${snippet ? ` ${snippet}` : '（空响应）'}`, {
+      detail: { status: res.status, contentType: ct, logid, size: buf.length },
+    })
+  }
+  try {
+    return proto.decode('Response', 'Response', buf)
+  } catch {
+    const strings = protoStrings(buf)
+    throw new CatbusError('UPSTREAM', `${what}响应解析失败（${buf.length} 字节${logid ? `，logid ${logid}` : ''}）：${(printable ? text.slice(0, 200).trim() : '') || strings.join(' / ') || '不是有效 protobuf'}`, {
+      detail: { size: buf.length, contentType: ct, logid, hex: Buffer.from(buf).toString('hex').slice(0, 400) },
+    })
+  }
+}
+
 /** 建立（或取回）与某个用户的单聊会话（上游 create_conversation）。 */
 export async function createConversation(d: Douyin, toUid: string): Promise<Conversation> {
   const myUid = await d.uid()
@@ -84,9 +144,16 @@ export async function createConversation(d: Douyin, toUid: string): Promise<Conv
   if (!prv) throw new CatbusError('AUTH_REQUIRED', '当前账号缺少 bd-ticket-guard 私钥，建不了私信会话（Cookie 登录不会生成）', { hint: '在「账号与设置」用同一账号扫码登录后再发' })
   req.reuqest_sign = ecdsaSign(compactJson({ sign_data: `avatar_url=&idempotent_id=&name=&participants=${toUid},${myUid}`, certType: 'cookie', scene: 'web_protect' }), prv)
   const res = await d.request({ method: 'POST', url: `${IMAPI}/v2/conversation/create`, headers: protoHeaders().list(), body: proto.encode('Request', 'Request', req) })
-  const body = proto.decode('Response', 'Response', new Uint8Array(await res.arrayBuffer()))
+  const body = await decodeImResponse(res, '创建私信会话')
   const conv = body.body?.create_conversation_v2_body?.conversation_info_list?.[0]
-  if (!conv) throw new CatbusError('UPSTREAM', `创建私信会话失败：${body.error_desc || body.message || ''}`, { detail: { cmd: body.cmd, message: body.message } })
+  if (!conv) {
+    const desc = String(body.error_desc || body.message || '')
+    const mismatch = /session length/i.test(desc)
+    throw new CatbusError('UPSTREAM', `创建私信会话失败：${desc}${mismatch ? '（ticket 与 cookie 不是同一次登录，或 ticket 被截断：请重新扫码，或重新抓取 dy.json 后导入）' : ''}`, {
+      hint: mismatch ? '在「账号与设置」重新扫码登录，或重新抓取 dy.json 再导入；Cookie 单独登录不会带 ticket' : undefined,
+      detail: { cmd: body.cmd, message: body.message },
+    })
+  }
   return { conversationId: conv.conversation_id, shortId: String(conv.conversation_short_id), ticket: conv.ticket }
 }
 
@@ -146,7 +213,7 @@ export async function sendMessage(d: Douyin, conv: Conversation, messageType: nu
   const fp = d.cookie('s_v_web_id') ?? ''
   p.add('verifyFp', fp).add('fp', fp)
   const res = await d.request({ method: 'POST', url: `${IMAPI}/v1/message/send`, headers: h.list(), query: p.pairs(), body: proto.encode('Request', 'Request', req) })
-  const body = proto.decode('Response', 'Response', new Uint8Array(await res.arrayBuffer()))
+  const body = await decodeImResponse(res, '发送私信')
   if (body.message !== 'OK') throw new CatbusError('UPSTREAM', `私信发送失败：${body.error_desc || body.message || ''}`, { detail: { message: body.message ?? null, error: body.error_desc ?? null } })
   return clientMessageId
 }

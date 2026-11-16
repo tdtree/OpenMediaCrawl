@@ -554,6 +554,29 @@ describe('douyin 对拍：补齐的命令流程', () => {
     expect(publishDesc({ topic: ['旅行'] })).toBe('#旅行')
   })
 
+  it('IM 响应不是 protobuf 时给出 HTTP/JSON 原文，而不是 index out of range', async () => {
+    const mk = (body: string | Uint8Array, status = 200, ct = 'application/json') => ({
+      status, ok: status < 400, url: '',
+      headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? ct : null), getSetCookie: () => [] },
+      text: async () => Buffer.from(body).toString('utf8'),
+      json: async () => JSON.parse(Buffer.from(body).toString('utf8')),
+      arrayBuffer: async () => Buffer.from(body),
+      clone() { return this },
+    }) as any
+    await expect(im.decodeImResponse(mk('{"message":"risk control"}'), '创建私信会话'))
+      .rejects.toMatchObject({ code: 'UPSTREAM', message: expect.stringContaining('HTTP 200') })
+    await expect(im.decodeImResponse(mk('{"message":"risk control"}'), '创建私信会话'))
+      .rejects.toThrow(/risk control/)
+    await expect(im.decodeImResponse(mk('server error', 500, 'text/plain'), '发送私信'))
+      .rejects.toThrow(/HTTP 500.*server error/s)
+    // 20 字节的坏 protobuf：不能再只报 index out of range
+    const bad = Buffer.alloc(20, 0x61)
+    bad[0] = 0x1a
+    bad[1] = 0x64
+    await expect(im.decodeImResponse(mk(bad, 200, 'application/x-protobuf'), '创建私信会话'))
+      .rejects.toThrow(/响应解析失败（20 字节/)
+  })
+
   it('msg send 的参数约束：--file / --share 也算消息内容', async () => {
     const { PLATFORMS } = await import('../src/platforms/index.js')
     const web = PLATFORMS.find((p) => p.id === 'douyin')!.endpoints.web

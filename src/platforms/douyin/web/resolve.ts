@@ -44,7 +44,20 @@ export async function resolveUser(d: Douyin, input: string): Promise<string> {
   }
   const m = secUidOf(await expand(d, input))
   if (m) return m
-  throw new CatbusError('USAGE', `无法识别的用户：${input}`, { hint: '传用户 sec_uid（MS4wLjAB 开头）或主页链接 https://www.douyin.com/user/<sec_uid>' })
+  // 用户可能直接粘抖音号 / 昵称：按搜索精确匹配换 sec_uid，匹配不到就拒绝，避免发给错的人
+  const q = input.trim()
+  if (/^[A-Za-z0-9._-]{2,40}$/.test(q)) {
+    try {
+      const found = await api.searchUser(d, q, '0', '10')
+      const infos = (Array.isArray(found?.user_list) ? found.user_list : [])
+        .map((row: any) => row?.user_info)
+        .filter(Boolean)
+      const hit = infos.find((u: any) => u.unique_id === q || u.short_id === q)
+        ?? infos.find((u: any) => u.nickname === q)
+      if (hit?.sec_uid) return String(hit.sec_uid)
+    } catch {}
+  }
+  throw new CatbusError('USAGE', `无法识别的用户：${input}`, { hint: '传用户 sec_uid（MS4wLjAB 开头）、主页链接，或能精确匹配的抖音号 / 昵称' })
 }
 
 export type ShareTarget = { kind: 'item'; id: string } | { kind: 'user'; secUid: string } | { kind: 'web'; url: string }

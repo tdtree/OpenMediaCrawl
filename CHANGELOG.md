@@ -44,6 +44,9 @@
 - 本机一键抓取抖音凭证：控制台直接下发零依赖抓取工具（`/api/capture/dy-capture.mjs` + 生成 `capture-douyin.bat`），普通用户不需要仓库或 npm，只要 Node.js 22+ 和 Chrome；扫码后自动抓 `cookie / ticket / ts_sign / client_cert / private_key` 生成用户目录下的 `dy.json`，账号页「导入 dy.json」自动填五个输入。开发机仍可用 `npm run capture:douyin`（puppeteer-core 版）
 - 触达 → 候选池支持「手动添加测试号」：填平台 + UID / sec_uid / 主页链接即可加入私信候选（不绑定作品），群发前可先给自己的小号发一条验证收信；重复添加只算一次
 - 账号与设置 → 账号列表每行新增「删除」：确认后只删本地这份登录态（`auth/<平台>/web/<账号>.json`）；删的是当前账号时一并清掉 `_current`，平台上的账号不受影响。删除后列表即时刷新
+- 触达 → 群发只发**勾选**的候选：按钮先检查勾选，确认框写明「勾选 N 人」；服务端按 `ids` 过滤，未勾选的一条都不发
+- 触达 → 手动添加私信候选先认人：UID / sec_uid / 主页链接先解析成 sec_uid 再入池，认不出直接拒绝并提示；抖音号/昵称按搜索精确匹配，匹配不到不猜
+- 私信建会话响应不是 protobuf（风控 JSON / 空体 / 截断）时给出 HTTP 状态、原文与 logid，不再只报 `index out of range`；`unexepcted session length` 明确提示 ticket 与 cookie 不是同一次登录，需重新扫码或重新抓取 `dy.json`
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

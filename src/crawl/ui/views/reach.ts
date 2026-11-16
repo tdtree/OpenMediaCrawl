@@ -588,18 +588,20 @@ async function reachStartCampaign(ev){
   var type=$('#reachCampType').value;
   var text=$('#reachCampText').value.trim();
   var min=Number($('#reachCampMin').value),max=Number($('#reachCampMax').value);
+  var ids=reachSelIds();
+  if(!ids.length){reachSetCampMsg('先在候选池勾选要群发的人');return}
   if(!text){reachSetCampMsg('文案不能为空');$('#reachCampText').focus();return}
   if(text.length>500){reachSetCampMsg('文案最多 500 字，现在 '+text.length+' 字');return}
   if(!isFinite(min)||min<5)min=5;
   if(!isFinite(max)||max<min)max=min;
   var cap=reachSettings.dailyCap==null?'-':String(reachSettings.dailyCap);
-  var title=(type==='reply'?'统一回复':'统一私信')+'：间隔 '+min+'-'+max+' 秒，单日上限 '+cap;
+  var title=(type==='reply'?'统一回复':'统一私信')+'：勾选 '+ids.length+' 人，间隔 '+min+'-'+max+' 秒，单日上限 '+cap;
   if(!confirm(title+nl()+nl()+text+nl()+nl()+'开始后按顺序一条条发，随时可以停。确认开始？'))return;
   var btn=$('#reachCampStart');
   if(btn)btn.disabled=true;
   reachSetCampMsg('排队中…');
   try{
-    var r=await post('/api/campaigns',{type:type,text:text,minSeconds:min,maxSeconds:max});
+    var r=await post('/api/campaigns',{type:type,text:text,minSeconds:min,maxSeconds:max,ids:ids});
     reachSettings={dailyCap:r.dailyCap,minSeconds:r.minSeconds,maxSeconds:r.maxSeconds};
     if($('#reachCampMin'))$('#reachCampMin').value=r.minSeconds;
     if($('#reachCampMax'))$('#reachCampMax').value=r.maxSeconds;
@@ -902,7 +904,8 @@ async function reachAddManual(){
   if(btn)btn.disabled=true;
   try{
     var r=await post('/api/candidates',{type:'dm',platform:platform,itemId:'manual',userId:target,userName:name||undefined,note:'手动添加'});
-    reachShow(msg,r.added?'已加入私信候选：'+target:'这个号已经在候选池里了');
+    var who=(r&&r.candidate&&r.candidate.userName)||name||target;
+    reachShow(msg,r.added?('已加入私信候选：'+who):'这个号已经在候选池里了');
     toast(r.added?'已加入候选池':'已在候选池中',r.added?'ok':'');
     $('#reachAddTarget').value='';
     await reachLoadCandidates();

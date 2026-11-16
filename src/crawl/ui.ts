@@ -304,6 +304,15 @@ export async function startUiServer(options: { port?: number; host?: string; out
     } catch {}
   }
 
+  /** 手动加私信候选前先认人：UID / sec_uid / 主页链接都换成 sec_uid，认不出就不让加。 */
+  async function resolveTarget(home: string, platform: string, target: string): Promise<{ id: string; name: string | null }> {
+    if (!findPlatform(platform)) throw new Error(`不支持的平台：${platform}`)
+    const client = (options.clientFactory ?? createSubprocessClient)(platform as CrawlPlatform, { env: { ...process.env, CATBUS_HOME: home } })
+    const who = await client.creator(target)
+    if (!who?.id) throw new Error(`无法识别的用户：${target}`)
+    return { id: who.id, name: who.name ?? null }
+  }
+
   /** 把固定路径的二维码复制成这次 login 专属的一份；页面只显示自己这次登录的码。 */
   async function snapshotQr(login: LoginJob): Promise<number | null> {
     const dir = join(login.home, 'cache', login.platform)
@@ -903,19 +912,38 @@ export async function startUiServer(options: { port?: number; host?: string; out
       return json(res, { removed })
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/resolve') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const target = String(input.target ?? '').trim()
+      if (!platform || !target) return json(res, { error: '需要 platform 和 target' }, 400)
+      try { return json(res, await resolveTarget(home, platform, target)) }
+      catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
+    }
+
     if (url.pathname === '/api/candidates' && req.method === 'GET') return json(res, { candidates: await listCandidates(root) })
     if (url.pathname === '/api/candidates' && req.method === 'POST') {
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
       try {
         const type = input.type === 'dm' ? 'dm' : 'reply'
+        const platform = String(input.platform ?? '')
+        const itemId = String(input.itemId ?? '')
+        let userId = input.userId ? String(input.userId) : undefined
+        let userName = input.userName ? String(input.userName) : undefined
+        if (type === 'dm' && itemId === 'manual' && userId) {
+          const who = await resolveTarget(home, platform, userId)
+          userId = who.id
+          userName = userName || who.name || undefined
+        }
         const result = await addCandidate(root, {
           type,
-          platform: String(input.platform ?? ''),
-          itemId: String(input.itemId ?? ''),
+          platform,
+          itemId,
           commentId: input.commentId ? String(input.commentId) : undefined,
-          userId: input.userId ? String(input.userId) : undefined,
-          userName: input.userName ? String(input.userName) : undefined,
+          userId,
+          userName,
           note: input.note ? String(input.note).slice(0, 200) : undefined,
         })
         return json(res, result, result.added ? 201 : 200)
@@ -1056,7 +1084,9 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const minSeconds = Math.max(5, Number(input.minSeconds ?? settings.minSeconds))
       const maxSeconds = Math.max(minSeconds, Number(input.maxSeconds ?? settings.maxSeconds))
       const ledger = new SendLedger(join(root, 'sent.jsonl'))
-      const all = (await listCandidates(root)).filter((c) => c.type === type)
+      const wanted = Array.isArray(input.ids) ? new Set(input.ids.map(String)) : null
+      if (wanted && !wanted.size) return json(res, { error: '先在候选池勾选要群发的人' }, 400)
+      const all = (await listCandidates(root)).filter((c) => c.type === type && (!wanted || wanted.has(c.id)))
       const queue: typeof all = []
       const skipped = { sent: 0, cap: 0, other: 0 }
       for (const candidate of all) {

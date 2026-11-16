@@ -247,12 +247,12 @@ describe('web UI', () => {
     if (savedEnv.bin === undefined) delete process.env.MEDIACRAWL_BIN; else process.env.MEDIACRAWL_BIN = savedEnv.bin
   })
 
-  async function uiServer(prefix: string) {
+  async function uiServer(prefix: string, clientFactory?: (platform: any, extra: any) => any) {
     const out = await tempDir(prefix)
     const home = await tempDir(`${prefix}home-`)
     process.env.OMC_USERS_FILE = join(home, 'users.json')
     process.env.OMC_ADMIN_PASSWORD = 'adminpass123'
-    const ui = await startUiServer({ port: 0, out, clientFactory: () => baseClient([]) })
+    const ui = await startUiServer({ port: 0, out, clientFactory: clientFactory ?? (() => baseClient([])) })
     return { out, ui, base: `http://${ui.host}:${ui.port}` }
   }
 
@@ -571,6 +571,39 @@ describe('web UI', () => {
       })).json() as { deleted: boolean }
       expect(tplDel.deleted).toBe(true)
       expect(((await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json()) as { items: unknown[] }).items).toEqual([])
+    } finally { await ui.close() }
+  })
+
+  it('群发只发勾选的候选，手动加号先认人', async () => {
+    const factory = ((platform: string) => ({
+      creator: async (target: string) => {
+        if (target === 'qi.emama') return { id: 'MS4wLjABAAAA_resolved', name: '测试号', url: null }
+        throw new Error(`无法识别的用户：${target}`)
+      },
+    })) as any
+    const { out, ui, base } = await uiServer('omc-pick-', factory)
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      // 手动加号：能识别的换成 sec_uid 存，认不出的 400 且不入池
+      const ok = await fetch(`${base}/api/candidates`, { method: 'POST', headers: auth, body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'manual', userId: 'qi.emama' }) })
+      expect(ok.status).toBe(201)
+      const bad = await fetch(`${base}/api/candidates`, { method: 'POST', headers: auth, body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'manual', userId: 'nobody' }) })
+      expect(bad.status).toBe(400)
+      const pool = await (await fetch(`${base}/api/candidates`, { headers: { cookie } })).json() as { candidates: Array<{ id: string; userId: string }> }
+      expect(pool.candidates).toHaveLength(1)
+      expect(pool.candidates[0]!.userId).toBe('MS4wLjABAAAA_resolved')
+      // 再放一个候选，但群发只勾第一个
+      const poolFile = join(out, 'users', 'admin', 'candidates.json')
+      const saved = JSON.parse(await readFile(poolFile, 'utf8')) as { items: any[] }
+      saved.items.push({ ...saved.items[0], id: 'second', userId: 'MS4wLjABAAAA_second' })
+      await writeFile(poolFile, JSON.stringify(saved))
+      const started = await fetch(`${base}/api/campaigns`, { method: 'POST', headers: auth, body: JSON.stringify({ type: 'dm', text: '你好', ids: [pool.candidates[0]!.id], minSeconds: 5, maxSeconds: 5 }) })
+      expect(started.status).toBe(202)
+      const job = await started.json() as { total: number }
+      expect(job.total).toBe(1)
+      const empty = await fetch(`${base}/api/campaigns`, { method: 'POST', headers: auth, body: JSON.stringify({ type: 'dm', text: '你好', ids: [], minSeconds: 5, maxSeconds: 5 }) })
+      expect(empty.status).toBe(400)
     } finally { await ui.close() }
   })
 
