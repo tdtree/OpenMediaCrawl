@@ -489,6 +489,15 @@ describe('web UI', () => {
       expect(leads.items[0]!.matched).toEqual(['多少钱'])
       expect(leads.items[0]!.contacts[0]).toMatchObject({ type: 'wechat', value: 'abc_123' })
 
+      // 勾选的线索可以直接进私信候选池（按用户去重）
+      const pickedLeads = leads.items.map((lead) => lead.id)
+      const toPool = await (await fetch(`${base}/api/leads/candidates`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ ids: pickedLeads }) })).json() as { added: number; skipped: number; missing: number; total: number }
+      expect(toPool).toMatchObject({ added: 1, skipped: 0, missing: 0, total: 1 })
+      const pool = await (await fetch(`${base}/api/candidates`, { headers: { cookie } })).json() as { candidates: Array<{ type: string; platform: string; itemId: string; userId: string | null; commentId: string | null }> }
+      expect(pool.candidates.find((one) => one.type === 'dm')).toMatchObject({ platform: 'douyin', itemId: 'i1', userId: 'u1', commentId: null })
+      const again = await (await fetch(`${base}/api/leads/candidates`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ ids: pickedLeads }) })).json() as { added: number; skipped: number }
+      expect(again).toMatchObject({ added: 0, skipped: 1 })
+
       const csv = await fetch(`${base}/api/leads/export.csv?platform=douyin`, { headers: auth })
       expect(csv.status).toBe(200)
       const buffer = Buffer.from(await csv.arrayBuffer())

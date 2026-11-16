@@ -759,6 +759,36 @@ export async function startUiServer(options: { port?: number; host?: string; out
       res.end(csv)
       return
     }
+    if (req.method === 'POST' && url.pathname === '/api/leads/candidates') {
+      // 线索里勾选的人直接进私信候选池：按 (平台, 作品, 用户) 去重，重复点不会多出人。
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const ids = Array.isArray(input.ids) ? input.ids.map((value) => String(value)).filter(Boolean) : []
+      if (!ids.length) return json(res, { error: '需要 ids' }, 400)
+      const wanted = new Set(ids.slice(0, 500))
+      const leads = await new LeadStore(join(root, 'leads.jsonl')).load()
+      const picked = leads.filter((lead) => wanted.has(lead.id))
+      let added = 0
+      let skipped = 0
+      let missing = 0
+      for (const lead of picked) {
+        if (!lead.author_id) { missing++; continue }
+        try {
+          const result = await addCandidate(root, {
+            type: 'dm',
+            platform: lead.platform,
+            itemId: lead.item_id,
+            // 私信候选按用户去重：不带 commentId，同一个人从两条评论进来只留一个。
+            userId: lead.author_id,
+            userName: lead.author_name ?? undefined,
+            note: lead.item_title ? String(lead.item_title).slice(0, 80) : undefined,
+          })
+          if (result.added) added++
+          else skipped++
+        } catch { skipped++ }
+      }
+      return json(res, { added, skipped, missing, total: picked.length })
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/dashboard') {
       const leads = await new LeadStore(join(root, 'leads.jsonl')).load()

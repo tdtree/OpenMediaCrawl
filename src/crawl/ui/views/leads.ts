@@ -1,7 +1,7 @@
 import type { View } from '../types.js'
 
 /**
- * 线索：主任务是「看 / 筛 / 导出」。
+ * 线索：主任务是「看 / 筛 / 加候选池 / 导出」。
  * 首屏 = 一行自动同步状态 + 一行统计 + 一条工具栏 + 表格；进页面即自动同步，导出是唯一主按钮。
  * 视图 js 与其它视图共享全局作用域，id / class / 变量一律 leads 前缀。
  */
@@ -9,7 +9,7 @@ export const leads: View = {
   id: 'leads',
   nav: '线索',
   title: '线索',
-  sub: '按平台、地域和联系方式筛选评论线索，导出 CSV。',
+  sub: '按平台、地域和联系方式筛选评论线索，加入私信候选池或导出 CSV。',
   css: String.raw`
 .leads-stats{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s5);margin-bottom:var(--s3)}
 .leads-stat{display:inline-flex;align-items:baseline;gap:6px}
@@ -125,6 +125,7 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
   <div class="leads-actions">
     <button class="primary" type="button" id="leadsExportBtn">导出全部</button>
     <button class="ghost" type="button" id="leadsExportRawBtn">导出完整号码</button>
+    <button class="ghost" type="button" id="leadsCandBtn" disabled>加入候选池</button>
   </div>
 
   <div class="leads-body" id="leadsBody"><p class="loading">读取中…</p></div>
@@ -145,7 +146,8 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     province:$('#leadsProvince'),
     contact:$('#leadsHasContact'),
     exportBtn:$('#leadsExportBtn'),
-    rawBtn:$('#leadsExportRawBtn')
+    rawBtn:$('#leadsExportRawBtn'),
+    candBtn:$('#leadsCandBtn')
   };
   var leadsState={user:'',items:[],total:0,offset:0,selected:{},open:{},error:'',stats:null,statsError:'',platforms:null,seq:0,touch:0,terms:[],hl:[],
     sync:{state:'idle',running:false,platforms:0,names:'',added:0,total:0,error:''}};
@@ -474,6 +476,10 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     leadsEls.exportBtn.textContent=picked?('导出选中 ('+picked+')'):'导出全部';
     leadsEls.exportBtn.disabled=!picked&&leadsState.total===0;
     leadsEls.rawBtn.disabled=leadsState.total===0;
+    if(leadsEls.candBtn){
+      leadsEls.candBtn.textContent=picked?('加入候选池 ('+picked+')'):'加入候选池';
+      leadsEls.candBtn.disabled=!picked;
+    }
   }
   function leadsDetailHtml(lead){
     var itemTitle=lead.item_title||'';
@@ -898,6 +904,32 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     if(!window.confirm('导出'+scope+'，CSV 里是完整手机号 / 微信号（明文保存）。确定继续？'))return;
     leadsDownload(leadsExportUrl({ids:ids,mask:false}));
     toast('正在导出完整号码');
+  });
+  /* 勾选的线索直接进私信候选池，之后到「触达」页就能按候选池群发。 */
+  if(leadsEls.candBtn)leadsEls.candBtn.addEventListener('click',async function(){
+    var ids=leadsSelectedIds();
+    if(!ids.length){toast('先勾选线索','err');return}
+    var btn=leadsEls.candBtn;
+    btn.disabled=true;
+    var label=btn.textContent;
+    btn.textContent='加入中…';
+    try{
+      var r=await post('/api/leads/candidates',{ids:ids});
+      var parts=['新增 '+leadsCount(r.added),'重复 '+leadsCount(r.skipped)];
+      if(r.missing)parts.push('缺作者 '+leadsCount(r.missing));
+      toast('已加入私信候选池：'+parts.join(' · '),'ok');
+      leadsState.selected={};
+      var picks=leadsEls.body.querySelectorAll('.leads-pick');
+      for(var i=0;i<picks.length;i++)picks[i].checked=false;
+      var all=$('#leadsPickAll');
+      if(all)all.checked=false;
+      leadsSyncSelection();
+    }catch(e){
+      toast('加入候选池失败：'+e.message,'err');
+    }finally{
+      btn.textContent=label;
+      leadsRenderActions();
+    }
   });
   leadsEls.sync.addEventListener('click',function(event){
     var target=event.target;
