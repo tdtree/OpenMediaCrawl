@@ -697,7 +697,7 @@ export async function msgSend(ctx: Ctx) {
   }
   const d = await douyin(ctx)
   d.requireLogin()
-  if (!d.privateKey) throw authError(ctx, '私信需要扫码登录时生成的 bd-ticket-guard 私钥')
+  if (!d.privateKey) throw authError(ctx, '当前账号缺少 bd-ticket-guard 私钥，私信发不出去（Cookie 登录不会生成）', '在「账号与设置」用同一账号扫码登录一次；扫码会生成并保存私钥，之后私信 / 评论 / 发布才能签名')
   const conv = await conversationFor(ctx, d)
   const outbox: Outgoing[] = []
   if (ctx.args.text) outbox.push({ messageType: im.IM_TEXT, content: im.textContent(ctx.args.text), type: 'text', text: ctx.args.text })

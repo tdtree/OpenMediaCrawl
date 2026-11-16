@@ -13,6 +13,7 @@ import { buildBlob, computedFeatures, defaultProfile, murmur3 } from '../src/pla
 import * as im from '../src/platforms/douyin/web/im.js'
 import * as live from '../src/platforms/douyin/web/live.js'
 import { Passport } from '../src/platforms/douyin/web/passport.js'
+import { Headers } from '../src/platforms/douyin/web/profile.js'
 import * as proto from '../src/platforms/douyin/web/proto.js'
 import { commonBehavior, commonReport, strDataReport } from '../src/platforms/douyin/web/mssdk.js'
 import { ABogus, fakeWebid, liveSignature, randomMsToken, signedUrl, sm3, spliceUrl, svWebId, XBogus } from '../src/platforms/douyin/web/sign.js'
@@ -711,6 +712,17 @@ describe('douyin dtrait 内层 blob（上游 utils/dtrait_features.py、fix-dtra
     d.device.session_dtrait = 'static-header'
     expect(d.dtraitHeader('/aweme/v1/web/comment/publish')).toBe('static-header')
     expect(errorCode(() => d.dtraitHeader('/web/api/media/aweme/create_v2/', { strict: true }))).toBe('AUTH_REQUIRED')
+  })
+
+  it('缺少 bd-ticket-guard 私钥时写操作本地拦下，并提示去扫码登录', async () => {
+    const ctx = makeCtx({ platform: 'douyin', cookies: 'sessionid=fake; ttwid=fake', cookieDomain: '.douyin.com' })
+    Object.assign(ctx.credential.scopes.main!.tokens, { ticket: 'hash.fake', ts_sign: 'ts.2.fake' })
+    const d = new Douyin(ctx)
+    let err: { code?: string; message?: string; hint?: string } | undefined
+    try { await d.withBd(new Headers(), '/aweme/v1/web/comment/publish') } catch (error) { err = error as typeof err }
+    expect(err?.code).toBe('AUTH_EXPIRED')
+    expect(err?.message).toContain('bd-ticket-guard')
+    expect(err?.hint).toContain('扫码登录')
   })
 
   it('comment add：没有导入 dtrait_blob 时不再本地拒绝，按默认档案带上 x-tt-session-dtrait', async () => {

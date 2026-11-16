@@ -31,12 +31,12 @@ export function isGuest(ctx: HandlerContext): boolean {
 }
 
 /** 平台返回登录墙时：游客 → AUTH_REQUIRED；已登录 → AUTH_EXPIRED（AGENTS 5.2）。 */
-export function authError(ctx: HandlerContext, message?: string): CatbusError {
+export function authError(ctx: HandlerContext, message?: string, hint?: string): CatbusError {
   const p = ctx.platform.id
   const e = endpointFlag(ctx.endpoint)
-  if (isGuest(ctx)) return new CatbusError('AUTH_REQUIRED', message ?? '需要登录', { hint: `catbus ${p} auth login${e}` })
+  if (isGuest(ctx)) return new CatbusError('AUTH_REQUIRED', message ?? '需要登录', { hint: hint ?? `catbus ${p} auth login${e}` })
   return new CatbusError('AUTH_EXPIRED', message ?? `账号 ${ctx.account} 的登录态已失效`, {
-    hint: `catbus ${p} auth login -a ${ctx.account}${e}`,
+    hint: hint ?? `catbus ${p} auth login -a ${ctx.account}${e}`,
   })
 }
 

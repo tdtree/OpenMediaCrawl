@@ -207,6 +207,7 @@ catbus douyin comment list "<product_url>" --label 差评
 ## 已知限制
 
 - **写操作受设备风控（dtrait）限制**：发布、评论、点赞、收藏、私信等高风险接口要求带 `x-tt-session-dtrait` 头，内层的设备特征 blob 原本只能由浏览器生成。catbus 已集成上游 `fix-dtrait-blob` 分支的做法（用随包的设备档案现算；发布、评论、收藏、收藏夹移动必须按请求 path 现算，导入的成品 `session_dtrait` 不能用），但**发布仍然失败**：`create_v2` 返回 HTTP 200 空响应，catbus 报 `RISK_CONTROL`；上游在扫码后立即发布也同样失败。
+- **Cookie 登录不能发私信**：`bd-ticket-guard` 私钥只在扫码（或手机号）登录时生成并保存在凭证里；浏览器导出的 Cookie 只有公钥（`bd_ticket_guard_client_data`），导入后私信、评论、发布会在本地被拦下，报「缺少 bd-ticket-guard 私钥」。控制台会显示「去账号页扫码登录」按钮；扫码若返回 2046，先在抖音 App 内完成安全验证再扫。
 - **点赞可能连累登录态**：实测不带 dtrait 点赞返回 HTTP 403，之后登录态被踢，只能重新扫码。点赞、收藏、评论、私信、直播发言都还没有真机验证通过，请谨慎在常用账号上尝试。
 - **综合搜索的筛选还没真机验证**：上游 `c28ee5f` 起综合频道把筛选值放进 `filter_selected` 发出（`--type image` 也随之恢复），catbus 已同步，但结果是否真的按筛选返回还没在真机上确认。
 - **字段恒为空**：作品的 `title`（抖音作品只有描述，放在 `text`）、列表里的 `stats.views`。

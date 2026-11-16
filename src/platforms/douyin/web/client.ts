@@ -417,7 +417,7 @@ export class Douyin {
       throw authError(this.ctx, '当前账号缺少与 cookie 同一次登录的 ticket / ts_sign，写操作会被拒绝；请用扫码登录，或导入带 ticket 的凭证')
     }
     const prv = this.privateKey
-    if (!prv) throw authError(this.ctx, '当前账号缺少 bd-ticket-guard 私钥，请重新扫码登录')
+    if (!prv) throw authError(this.ctx, '当前账号缺少 bd-ticket-guard 私钥，写操作发不出去（Cookie 登录不会生成）', '在「账号与设置」用同一账号扫码登录一次后再试')
     const key = await this.ecdhKey(aid, origin)
     const trust = this.cookie('_bd_ticket_crypt_cookie')
     const tsSign = String(this.tokens.ts_sign)

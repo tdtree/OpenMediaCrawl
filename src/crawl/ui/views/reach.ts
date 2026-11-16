@@ -274,6 +274,18 @@ var reachPeerNames={};
 var reachChat={platform:'',peerId:'',peerName:'',messages:[],ghost:null,seq:0,sending:false,syncing:false};
 
 function reachShow(el,text){if(!el)return;if(text){el.textContent=text;el.hidden=false}else{el.textContent='';el.hidden=true}}
+/* Cookie 登录没有 bd-ticket-guard 私钥：错误后面挂一个跳账号页的按钮，别只丢原始文案 */
+function reachGuardLink(el,text){
+  if(!text||!/bd-ticket-guard|私钥/.test(text))return false;
+  if(!el)return true;
+  el.textContent=text;
+  el.hidden=false;
+  var b=document.createElement('button');
+  b.type='button';b.className='ghost sm';b.textContent='去账号页扫码登录 →';b.style.marginLeft='6px';
+  b.onclick=function(){go('account')};
+  el.appendChild(b);
+  return true;
+}
 function reachShort(v,n){var s=String(v==null?'':v);return s.length>n?s.slice(0,n-1)+'…':s}
 function reachParseJson(raw){
   if(raw==null)return null;
@@ -606,6 +618,9 @@ function reachWatchCampaign(id){
     reachAppendCamp((t?t+' ':'')+(e.message!=null?e.message:''));
     if(e.type==='sent'||e.type==='failed'){
       reachSetCampMsg('进行中：第 '+((e.index||0)+1)+' / '+(e.total||0)+' 条');
+      if(e.type==='failed'&&/bd-ticket-guard|私钥/.test(String(e.message||''))){
+        reachGuardLink($('#reachCampMsg'),'群发中断：当前抖音账号缺少 bd-ticket-guard 私钥');
+      }
     }
     if(e.type==='done'){
       reachCamp.done=true;
@@ -883,9 +898,13 @@ async function reachSendAction(ev){
   try{
     var r=await post('/api/action',{kind:kind,platform:platform,target:target,text:text,replyTo:replyTo||undefined});
     if(r&&r.ok){reachShow(msg,'已发送');toast('已发送')}
-    else reachShow(msg,'发送失败（'+((r&&r.code)||'ERROR')+'）：'+((r&&r.message)||'平台没有返回原因'));
+    else{
+      var failText='发送失败（'+((r&&r.code)||'ERROR')+'）：'+((r&&r.message)||'平台没有返回原因');
+      if(!reachGuardLink(msg,failText))reachShow(msg,failText);
+    }
   }catch(e){
-    reachShow(msg,'发送失败：'+e.message);
+    var errText='发送失败：'+e.message;
+    if(!reachGuardLink(msg,errText))reachShow(msg,errText);
   }
   if(btn)btn.disabled=false;
 }
@@ -1149,7 +1168,9 @@ async function reachChatSend(ev){
     if(same())await reachChatLoadMessages();
     reachLoadThreads();
   }catch(e){
-    reachChatNote('发送失败：'+e.message,true);
+    var note=$('#reachChatNote');
+    if(!reachGuardLink(note,'发送失败：'+e.message))reachChatNote('发送失败：'+e.message,true);
+    else note.className='reach-chat-note is-err';
     /* 失败的那条服务端也会记下来，重新拉一次就能看到红色「发送失败」气泡。 */
     if(same())await reachChatLoadMessages();
     reachLoadThreads();

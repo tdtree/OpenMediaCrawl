@@ -81,7 +81,7 @@ export async function createConversation(d: Douyin, toUid: string): Promise<Conv
   const req = normalRequest(609)
   req.body = { create_conversation_v2_body: { conversation_type: 1, participants: [toUid, myUid] } }
   const prv = d.privateKey
-  if (!prv) throw new CatbusError('AUTH_REQUIRED', '私信需要 bd-ticket-guard 私钥，请重新扫码登录')
+  if (!prv) throw new CatbusError('AUTH_REQUIRED', '当前账号缺少 bd-ticket-guard 私钥，建不了私信会话（Cookie 登录不会生成）', { hint: '在「账号与设置」用同一账号扫码登录后再发' })
   req.reuqest_sign = ecdsaSign(compactJson({ sign_data: `avatar_url=&idempotent_id=&name=&participants=${toUid},${myUid}`, certType: 'cookie', scene: 'web_protect' }), prv)
   const res = await d.request({ method: 'POST', url: `${IMAPI}/v2/conversation/create`, headers: protoHeaders().list(), body: proto.encode('Request', 'Request', req) })
   const body = proto.decode('Response', 'Response', new Uint8Array(await res.arrayBuffer()))

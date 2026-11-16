@@ -37,6 +37,7 @@
 - 登录失败文案写死「3 分钟」，抖音实际是 5 分钟；改为「有效期内」
 - **Docker Web 镜像漏拷 `static/`**：抖音扫码登录报 `ENOENT: /app/static/douyin/challenge_profile.json`。`Dockerfile.web` 补 `COPY static static` + `COPY assets assets`；启动时缺文件会打警告，`doctor` 增加 `static` 检查项
 - 抖音扫码 `error_code=2046`（App 内安全验证）现在报 `RISK_CONTROL` 并带操作步骤：在抖音 App → 我 → 设置 → 账号与安全完成验证后重新扫码，或改用 Cookie；登录文档同步说明
+- 抖音私信/写操作缺少 `bd-ticket-guard` 私钥时，报错改为「Cookie 登录不会生成」并带扫码提示；控制台在失败信息后直接给「去账号页扫码登录」按钮，群发中断时同样提示；补一条本地拦截测试
 - Web 镜像（`OMC_WEB_IMAGE=1`）缺验证码模型时 `doctor` 显示「未安装模型」但不再判失败；CLI 镜像仍按故障处理
 - 控制台 UI 规范审查收尾：18 处状态提示补 `role=status` / `aria-live`、话术名称补 `aria-label`、二维码图补 `width/height`、非登录输入框关闭自动填充、文本框占位符统一以 `…` 结尾；群发设置重排为「类型 + 间隔」一行、文案 3 行，1440 宽表单高度 443→312px，390 宽无横向溢出
 
