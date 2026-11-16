@@ -47,6 +47,7 @@
 - 触达 → 群发只发**勾选**的候选：按钮先检查勾选，确认框写明「勾选 N 人」；服务端按 `ids` 过滤，未勾选的一条都不发
 - 触达 → 手动添加私信候选先认人：UID / sec_uid / 主页链接先解析成 sec_uid 再入池，认不出直接拒绝并提示；抖音号/昵称按搜索精确匹配，匹配不到不猜
 - 私信建会话响应不是 protobuf（风控 JSON / 空体 / 截断）时给出 HTTP 状态、原文与 logid，不再只报 `index out of range`；`unexepcted session length` 明确提示 ticket 与 cookie 不是同一次登录，需重新扫码或重新抓取 `dy.json`
+- 私信发送遇 `{"decision":"KICK"}` 识别为风控而非解析失败：自动强制刷新 identity token，并换一套信封（`auth_type=1`、不带 bd-ticket / 旧版 bd-ticket）重试一次；仍失败则停止并提示人工发一条或换号。建会话遇 `unexepcted session length` 同样按新版 `auth_type=1`、顶层不签名重试一次
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

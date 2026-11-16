@@ -211,14 +211,17 @@ export async function identityToken(d: Douyin, force = false): Promise<{ token: 
   return d.identity
 }
 
+const NEW_PROTOCOL = new WeakSet<Douyin>()
+
 /** 发一条已经构造好的私信（上游 _send_message_raw），返回 client_message_id。 */
 export async function sendMessage(d: Douyin, conv: Conversation, messageType: number, content: unknown): Promise<string> {
-  const attempt = async (forceToken: boolean): Promise<string> => {
+  const attempt = async (mode: 'legacy' | 'new', forceToken: boolean): Promise<string> => {
     const h = protoHeaders()
-    await d.withBd(h, '/v1/message/send')
+    if (mode === 'legacy') await d.withBd(h, '/v1/message/send')
     const identity = await identityToken(d, forceToken)
     const clientMessageId = rand.uuid4()
     const req = normalRequest(100)
+    if (mode === 'new') req.auth_type = 1
     req.body = {
       send_message_body: {
         conversation_id: conv.conversationId,
@@ -248,11 +251,23 @@ export async function sendMessage(d: Douyin, conv: Conversation, messageType: nu
     return clientMessageId
   }
   try {
-    return await attempt(false)
+    return await attempt(NEW_PROTOCOL.has(d) ? 'new' : 'legacy', false)
   } catch (error) {
-    // 缓存的身份 token 可能已被服务端作废：KICK 时强制刷新一次再发，仍然 KICK 才报错。
-    if (error instanceof CatbusError && error.code === 'RISK_CONTROL') return await attempt(true)
-    throw error
+    if (!(error instanceof CatbusError) || error.code !== 'RISK_CONTROL') throw error
+    // KICK：先换另一套信封重试（新版 auth_type=1 + 不带 bd-ticket，或退回旧版），并强制刷新身份 token。
+    const alt: 'legacy' | 'new' = NEW_PROTOCOL.has(d) ? 'legacy' : 'new'
+    try {
+      const id = await attempt(alt, true)
+      if (alt === 'new') NEW_PROTOCOL.add(d)
+      else NEW_PROTOCOL.delete(d)
+      return id
+    } catch (second) {
+      throw new CatbusError('RISK_CONTROL', `${error.message}；已改用${alt === 'new' ? ' auth_type=1、不带 bd-ticket' : '旧版 bd-ticket 信封'}重试仍失败`, {
+        hint: '当前账号被抖音判定为风险会话：先在浏览器里手动发一条，或换账号/降低频率；不要连续重试',
+        detail: { first: error.detail, second: second instanceof CatbusError ? second.detail : String(second) },
+        cause: second,
+      })
+    }
   }
 }
 
