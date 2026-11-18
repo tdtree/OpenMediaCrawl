@@ -36,6 +36,14 @@ input.leads-chip-in{flex:1 1 120px;width:auto;min-width:80px;min-height:0;paddin
 input.leads-chip-in:focus{outline:none}
 mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;border-radius:2px}
 .leads-f-contact{padding-bottom:8px;white-space:nowrap}
+/* 状态筛选：三段式按钮，与 .field 的输入框同高 */
+.leads-f-status{width:auto}
+.leads-seg{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--card)}
+.leads-seg button{appearance:none;border:0;border-radius:0;background:transparent;color:var(--muted);font-size:var(--fs-sm);min-height:34px;padding:3px 10px}
+.leads-seg button+button{border-left:1px solid var(--line)}
+.leads-seg button:hover{background:var(--row-hover);color:var(--fg)}
+.leads-seg button.is-on,.leads-seg button.is-on:hover{background:var(--acc-soft);color:var(--acc-ink);font-weight:600}
+.leads-foot-note{flex:1 1 100%;margin:0}
 .leads-q-hint{flex:1 1 100%;margin:0}
 .leads-per{margin-left:auto;padding-bottom:9px;white-space:nowrap}
 
@@ -64,6 +72,11 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .leads-ct-line{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-xs)}
 .leads-hits{display:flex;flex-wrap:wrap;gap:4px}
 .leads-time{color:var(--muted);font-size:var(--fs-xs);white-space:nowrap;font-variant-numeric:tabular-nums;padding-left:6px;padding-right:6px}
+/* 状态列：文字在 badge 里，颜色只是补充 */
+.leads-st{display:flex;flex-wrap:wrap;gap:2px}
+.leads-tbl tbody tr.leads-row.leads-dm td{color:var(--muted)}
+/* 已私聊的行只加行首 2px 绿条，不整行铺色：hover / 勾选态仍走 .tbl 的规则 */
+.leads-tbl tbody tr.leads-row.leads-dm td:first-child{box-shadow:inset 2px 0 0 var(--ok)}
 .leads-tbl tbody tr.leads-row{cursor:pointer}
 .leads-tbl tbody tr.leads-row.is-open td{background:var(--row-hover)}
 .leads-tbl tbody tr.leads-detail:hover td{background:var(--bg)}
@@ -117,6 +130,14 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     <label class="field leads-f-province"><span>省份</span>
       <select id="leadsProvince"><option value="">全部地域</option></select>
     </label>
+    <div class="field leads-f-status">
+      <span id="leadsStatusLabel">私聊状态</span>
+      <div class="leads-seg" id="leadsStatusSeg" role="group" aria-labelledby="leadsStatusLabel">
+        <button type="button" class="is-on" data-leads-status="all" aria-pressed="true">全部</button>
+        <button type="button" data-leads-status="unsent" aria-pressed="false">未私聊</button>
+        <button type="button" data-leads-status="sent" aria-pressed="false">已私聊</button>
+      </div>
+    </div>
     <label class="check leads-f-contact"><input type="checkbox" id="leadsHasContact"> 只看有联系方式</label>
     <span class="leads-per tiny">每页 50 条</span>
     <p class="hint leads-q-hint" id="leadsQHint">搜索同时匹配评论内容和评论者昵称；每个词块是一个关键词，命中任意一个就算匹配（例：价格 私信 / 批发）。</p>
@@ -145,11 +166,12 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     qClearBtn:$('#leadsQClear'),
     province:$('#leadsProvince'),
     contact:$('#leadsHasContact'),
+    statusSeg:$('#leadsStatusSeg'),
     exportBtn:$('#leadsExportBtn'),
     rawBtn:$('#leadsExportRawBtn'),
     candBtn:$('#leadsCandBtn')
   };
-  var leadsState={user:'',items:[],total:0,offset:0,selected:{},open:{},error:'',stats:null,statsError:'',platforms:null,seq:0,touch:0,terms:[],hl:[],
+  var leadsState={user:'',items:[],total:0,offset:0,selected:{},open:{},error:'',stats:null,statsError:'',platforms:null,seq:0,touch:0,terms:[],hl:[],status:'all',
     sync:{state:'idle',running:false,platforms:0,names:'',added:0,total:0,error:''}};
   var leadsQTimer=null;
   var leadsIme=false;
@@ -390,7 +412,7 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
   /* ---------- 筛选参数 ---------- */
   /* 后端把 q 按 [\s/]+ 拆开做 OR 匹配；前端把词块 join(' ') 发出去，文案用同一份词表。 */
   function leadsHasFilter(){
-    return !!(leadsEls.platform.value||leadsQValue()||leadsEls.province.value||leadsEls.contact.checked);
+    return !!(leadsEls.platform.value||leadsQValue()||leadsEls.province.value||leadsEls.contact.checked||leadsState.status!=='all');
   }
   function leadsFilterText(){
     var parts=[];
@@ -399,6 +421,8 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     if(keywords.length===1)parts.push('关键词「'+keywords[0]+'」');
     else if(keywords.length>1)parts.push('关键词「'+keywords.join('」「')+'」（命中任意一个）');
     if(leadsEls.province.value)parts.push('省份 '+leadsEls.province.value);
+    if(leadsState.status==='sent')parts.push('只看已私聊（本页）');
+    else if(leadsState.status==='unsent')parts.push('只看未私聊（本页）');
     if(leadsEls.contact.checked)parts.push('只看有联系方式');
     return parts.length?('当前筛选：'+parts.join(' · ')):'';
   }
@@ -454,6 +478,56 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       html:texts.map(function(text){return '<span class="leads-ct-line">'+esc(text)+'</span>'}).join(''),
       title:texts.join(' / ')
     };
+  }
+
+  /* ---------- 状态（已私聊 / 已入池） ---------- */
+  /* 两个字段都是后端读线索时从发送账本 / 候选池关联出来的，只读；这里只做展示和本页筛选。
+     状态筛选纯前端（后端参数只有平台 / 关键词 / 地域 / 联系方式），所以只过滤当前这一页。 */
+  function leadsSentAt(lead){
+    return lead&&lead.dm_sent_at?String(lead.dm_sent_at):'';
+  }
+  function leadsVisibleItems(){
+    var mode=leadsState.status;
+    if(mode!=='sent'&&mode!=='unsent')return leadsState.items;
+    return leadsState.items.filter(function(lead){
+      return mode==='sent'?!!leadsSentAt(lead):!leadsSentAt(lead);
+    });
+  }
+  function leadsStatusRender(){
+    var box=leadsEls.statusSeg;
+    if(!box)return;
+    var btns=box.querySelectorAll('[data-leads-status]');
+    for(var i=0;i<btns.length;i++){
+      var on=btns[i].getAttribute('data-leads-status')===leadsState.status;
+      btns[i].className=on?'is-on':'';
+      btns[i].setAttribute('aria-pressed',on?'true':'false');
+    }
+  }
+  function leadsSetStatus(mode){
+    var next=(mode==='sent'||mode==='unsent')?mode:'all';
+    if(next===leadsState.status)return;
+    leadsState.status=next;
+    // 被筛掉的行不再保持勾选，免得分不清导出的是哪几条。
+    leadsState.selected={};
+    leadsStatusRender();
+    leadsRender();
+  }
+  /* 状态列：文字在 badge 里（颜色只是补充），title 带上时间；两个状态都成立时都显示。 */
+  function leadsStatusCell(lead){
+    var bits=[];
+    var sentAt=leadsSentAt(lead);
+    if(sentAt){
+      var when=fmtTime(sentAt)||sentAt;
+      bits.push('<span class="badge ok" title="'+esc('已私聊：'+when)+'">已私聊</span>');
+    }
+    if(lead&&lead.in_pool)bits.push('<span class="badge warn" title="已在私信候选池里">已入池</span>');
+    if(!bits.length)return '<span class="tiny" title="未私聊、未入池">—</span>';
+    return '<span class="leads-st">'+bits.join('')+'</span>';
+  }
+  function leadsStatusNote(){
+    if(leadsState.status!=='sent'&&leadsState.status!=='unsent')return '';
+    return '<p class="hint leads-foot-note">状态筛选只作用于本页：本页 '+leadsState.items.length+
+      ' 条中显示 '+leadsVisibleItems().length+' 条。上面的「共 … 条」和导出仍是后端的全部筛选结果（CSV 里有「私聊状态」列）。</p>';
   }
 
   /* ---------- 渲染 ---------- */
@@ -518,11 +592,12 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       '<td class="leads-ell" data-label="评论" title="'+esc(text)+'">'+leadsHl(text,tokens)+'</td>',
       '<td class="leads-c-ct" data-label="联系方式" title="'+esc(contacts.title)+'"><div class="leads-ct">'+contacts.html+'</div></td>',
       '<td class="leads-ell" data-label="地域">'+(lead.province?esc(lead.province):'<span class="tiny">—</span>')+'</td>',
+      '<td data-label="状态">'+leadsStatusCell(lead)+'</td>',
       '<td class="leads-time" data-label="时间">'+(lead.created_at?esc(fmtTime(lead.created_at)):'<span class="tiny">—</span>')+'</td>',
       '<td data-label="操作"><button type="button" class="sm ghost" data-act="detail" aria-expanded="'+(open?'true':'false')+'">'+(open?'收起':'详情')+'</button></td>'
     ];
-    return '<tr class="leads-row'+(open?' is-open':'')+'" data-id="'+esc(id)+'">'+cells.join('')+'</tr>'+
-      '<tr class="leads-detail" data-detail="'+esc(id)+'"'+(open?'':' hidden')+'><td colspan="7" data-label="">'+leadsDetailHtml(lead)+'</td></tr>';
+    return '<tr class="leads-row'+(leadsSentAt(lead)?' leads-dm':'')+(open?' is-open':'')+'" data-id="'+esc(id)+'">'+cells.join('')+'</tr>'+
+      '<tr class="leads-detail" data-detail="'+esc(id)+'"'+(open?'':' hidden')+'><td colspan="8" data-label="">'+leadsDetailHtml(lead)+'</td></tr>';
   }
   function leadsPagerHtml(){
     var pages=Math.max(1,Math.ceil(leadsState.total/leadsPageSize));
@@ -534,16 +609,17 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
         '<button type="button" class="sm" id="leadsPrev"'+(page<=1?' disabled':'')+'>上一页</button>'+
         '<button type="button" class="sm" id="leadsNext"'+(page>=pages?' disabled':'')+'>下一页</button>'+
       '</div>'+
+      leadsStatusNote()+
     '</div>';
   }
   function leadsTableHtml(){
-    var rows=[];
-    for(var i=0;i<leadsState.items.length;i++)rows.push(leadsRowHtml(leadsState.items[i]));
+    var items=leadsVisibleItems(),rows=[];
+    for(var i=0;i<items.length;i++)rows.push(leadsRowHtml(items[i]));
     return '<div class="tbl-wrap"><table class="tbl leads-tbl">'+
-      '<colgroup><col class="leads-c1"><col class="leads-c2"><col><col class="leads-c4"><col class="leads-c5"><col class="leads-c7"><col class="leads-c8"></colgroup>'+
+      '<colgroup><col class="leads-c1"><col class="leads-c2"><col><col class="leads-c4"><col class="leads-c5"><col class="leads-c6"><col class="leads-c7"><col class="leads-c8"></colgroup>'+
       '<thead><tr>'+
         '<th class="leads-c-sel"><input type="checkbox" id="leadsPickAll" aria-label="全选本页" title="全选本页"></th>'+
-        '<th>评论者</th><th>评论</th><th>联系方式</th><th>地域</th><th>时间</th><th>操作</th>'+
+        '<th>评论者</th><th>评论</th><th>联系方式</th><th>地域</th><th>状态</th><th>时间</th><th>操作</th>'+
       '</tr></thead>'+
       '<tbody>'+rows.join('')+'</tbody>'+
     '</table></div>'+leadsPagerHtml();
@@ -589,6 +665,14 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     leadsRenderActions();
     if(leadsState.error){leadsEls.body.innerHTML=leadsErrorHtml();return}
     if(!leadsState.items.length){leadsEls.body.innerHTML=leadsEmptyHtml();return}
+    if(!leadsVisibleItems().length){
+      leadsEls.body.innerHTML='<div class="empty">'+
+        '<b>本页没有符合状态筛选的线索</b>'+
+        '<p class="sub">'+esc('本页 '+leadsState.items.length+' 条都不符合「'+(leadsState.status==='sent'?'已私聊':'未私聊')+'」；状态筛选只作用于本页，翻页或清空筛选再看。')+'</p>'+
+        '<button class="btn" type="button" id="leadsClearFilters">清空筛选</button>'+
+      '</div>'+leadsPagerHtml();
+      return;
+    }
     leadsEls.body.innerHTML=leadsTableHtml();
     leadsSyncSelection();
   }
@@ -764,6 +848,8 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     leadsChipClear();
     leadsEls.province.value='';
     leadsEls.contact.checked=false;
+    leadsState.status='all';
+    leadsStatusRender();
     leadsFilterChanged();
   }
   function leadsToggleDetail(id){
@@ -806,6 +892,8 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     leadsState.touch=0;
     leadsState.terms.length=0;
     leadsState.hl=[];
+    leadsState.status='all';
+    leadsStatusRender();
     leadsState.sync={state:'idle',running:false,platforms:0,names:'',added:0,total:0,error:''};
     leadsEls.body.classList.remove('leads-busy');
     leadsEls.body.innerHTML='<p class="loading">读取中…</p>';
@@ -820,6 +908,13 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
   leadsEls.platform.addEventListener('change',leadsFilterChanged);
   leadsEls.province.addEventListener('change',leadsFilterChanged);
   leadsEls.contact.addEventListener('change',leadsFilterChanged);
+  /* 状态筛选纯前端：只重画，不重新请求后端。 */
+  if(leadsEls.statusSeg)leadsEls.statusSeg.addEventListener('click',function(event){
+    var target=event.target;
+    if(!target||!target.closest)return;
+    var btn=target.closest('[data-leads-status]');
+    if(btn)leadsSetStatus(btn.getAttribute('data-leads-status'));
+  });
 
   /* 词块：空格 / 斜杠 / 逗号 / 顿号切词，回车收尾，Backspace 删最后一个，× 单删，整串粘贴切词。 */
   if(leadsEls.qInput){

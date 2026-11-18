@@ -197,7 +197,7 @@ export function imFrame(raw: Uint8Array): Message | null {
   if (type === 27 && url(content.resource_url)) media.push(n.media({ type: 'image', url: url(content.resource_url)! }))
   if (type === 5 && url(content.url)) media.push(n.media({ type: 'image', url: url(content.url)! }))
   if (type === 17 && url(content.resource_url)) media.push(n.media({ type: 'audio', url: url(content.resource_url)! }))
-  return n.message(
+  const msg = n.message(
     {
       id: n.id(m.server_message_id),
       conversation_id: String(m.conversation_id ?? ''),
@@ -208,24 +208,88 @@ export function imFrame(raw: Uint8Array): Message | null {
     },
     m,
   )
+  // 推送帧自带 create_time（秒），但 normalize 只从下载器字段取时间，这里补一次，
+  // 免得自动回复要自己按收到时刻估算。
+  if (!msg.created_at && m.create_time) {
+    const sec = Number(m.create_time)
+    if (Number.isFinite(sec) && sec > 0) msg.created_at = new Date(sec * 1000).toISOString()
+  }
+  return msg
 }
 
-export function listenMessages(ctx: HandlerContext, d: Douyin): AsyncIterable<Message> {
-  return reconnecting(ctx, async function* () {
-    const s = await frontierSocket(d)
-    const socket = await openSocket(s.url, { headers: s.headers, proxy: ctx.config.proxy ?? undefined, signal: ctx.signal })
-    try {
-      for await (const raw of socket.messages) {
-        if (typeof raw === 'string') continue
-        try {
-          const msg = imFrame(raw)
-          if (msg) yield msg
-        } catch (err) {
-          ctx.log.debug(`解析私信推送失败：${(err as Error).message}`)
-        }
-      }
-    } finally {
-      socket.close()
+/**
+ * 最近见过的消息 id（有界去重）。重连后服务端会重放最近的消息（实测：一次重连连收两条旧消息），
+ * 同一个 id 只输出一次。服务端没给 server_message_id（空或 0）的帧不参与去重，否则会被并成一条。
+ */
+export class RecentIds {
+  private readonly ids = new Set<string>()
+
+  constructor(private readonly limit: number = 2000) {}
+
+  /** 第一次见到返回 true；窗口内重复返回 false。超出窗口时丢掉最早的那个 id。 */
+  add(id: string): boolean {
+    if (!id || id === '0') return true
+    if (this.ids.has(id)) return false
+    this.ids.add(id)
+    if (this.ids.size > this.limit) {
+      const oldest = this.ids.values().next().value
+      if (oldest != null) this.ids.delete(oldest)
     }
-  })
+    return true
+  }
+
+  get size(): number {
+    return this.ids.size
+  }
+}
+
+export interface ListenMessagesOptions {
+  /** 按 message id 去重，默认开启。关掉后重连重放的消息会重复输出（与加这个开关之前一样）。 */
+  dedupe?: boolean
+  /** 去重窗口：记住最近多少条 id，默认 2000。 */
+  dedupeWindow?: number
+  /** 重连退避上限（毫秒），默认 15 秒。 */
+  maxDelay?: number
+}
+
+/** 推送帧流 → Message 流：解析失败只记 debug 跳过；`recent` 不为空时丢掉窗口内重复的 id。 */
+export async function* frameMessages(ctx: HandlerContext, frames: AsyncIterable<string | Buffer>, recent: RecentIds | null): AsyncGenerator<Message> {
+  for await (const raw of frames) {
+    if (typeof raw === 'string') continue
+    let msg: Message | null
+    try {
+      msg = imFrame(raw)
+    } catch (err) {
+      ctx.log.debug(`解析私信推送失败：${(err as Error).message}`)
+      continue
+    }
+    if (!msg) continue
+    if (recent && !recent.add(String(msg.id))) {
+      ctx.log.debug(`跳过重连重放的私信：${msg.id}`)
+      continue
+    }
+    yield msg
+  }
+}
+
+/**
+ * 私信长连：断线自动重连，重连后服务端重放的消息按 id 去重（见 {@link RecentIds}）。
+ * 退避上限 15 秒（比弹幕的 30 秒短）：私信是推送型的，连不上就一直漏，宁可多试几次。
+ */
+export function listenMessages(ctx: HandlerContext, d: Douyin, options: ListenMessagesOptions = {}): AsyncIterable<Message> {
+  // 去重窗口挂在重连循环外面：重连后服务端会重放最近的消息，跨连接也要认得出同一个 id。
+  const recent = (options.dedupe ?? true) ? new RecentIds(options.dedupeWindow ?? 2000) : null
+  return reconnecting(
+    ctx,
+    async function* () {
+      const s = await frontierSocket(d)
+      const socket = await openSocket(s.url, { headers: s.headers, proxy: ctx.config.proxy ?? undefined, signal: ctx.signal })
+      try {
+        yield* frameMessages(ctx, socket.messages, recent)
+      } finally {
+        socket.close()
+      }
+    },
+    { maxDelay: options.maxDelay ?? 15_000 },
+  )
 }

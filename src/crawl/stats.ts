@@ -32,7 +32,9 @@ const PERCENT_CAP_TENTHS = 1000
 const RUNNING_STATUS: ReadonlySet<string> = new Set(['running', 'pending'])
 
 /** 本地日期键：YYYY-MM-DD（不能用 toISOString，那是 UTC，会整体差 8 小时）。 */
-function dayKey(date: Date): string {
+/** 本地日期键（YYYY-MM-DD）。全仓只留这一份实现：guard 的日发送上限、
+ *  统计的按天聚合都用它，避免「同一处用了 UTC 导致整体差 8 小时」这类口径分叉。 */
+export function dayKey(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')

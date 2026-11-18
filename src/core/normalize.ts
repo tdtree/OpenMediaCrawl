@@ -237,7 +237,12 @@ export function rank(v: Partial<Rank> & { rank: number; user: UserRef }, raw?: u
 }
 
 export function conversation(v: Partial<Conversation> & { id: string }, raw?: unknown): Conversation {
-  return attach({ id: v.id, peer: v.peer ?? null, unread: v.unread ?? null, last_message: v.last_message ?? null, updated_at: v.updated_at ?? null }, raw)
+  const out: Conversation = { id: v.id, peer: v.peer ?? null, unread: v.unread ?? null, last_message: v.last_message ?? null, updated_at: v.updated_at ?? null }
+  // 下面三个只有能判断的平台才给（见 AGENTS 6.2），不给时输出里不出现这个键。
+  if (v.folder !== undefined) out.folder = v.folder
+  if (v.last_sender !== undefined) out.last_sender = v.last_sender ?? null
+  if (v.peer_uid !== undefined) out.peer_uid = v.peer_uid ?? null
+  return attach(out, raw)
 }
 
 export function message(v: Partial<Message> & { id: string; conversation_id: string }, raw?: unknown): Message {

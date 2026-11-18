@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadIndex, resetRecordCache, threadOf } from '../src/crawl/records.js'
+import { loadIndex, recordCacheStats, resetRecordCache, threadOf } from '../src/crawl/records.js'
 import { addCandidate, clearCandidates, listCandidates, removeCandidate } from '../src/crawl/candidates.js'
 import { runCampaign } from '../src/crawl/campaign.js'
 import type { Candidate } from '../src/crawl/candidates.js'
@@ -29,6 +29,28 @@ describe('records index', () => {
     expect(await loadIndex(root, 'douyin')).toBe(index) // 同一个缓存对象
     await writeFile(join(root, 'douyin', 'search_comment_2026-11-12.jsonl'), [comment('c1', 'i1'), comment('c2', 'i1', 'c1'), comment('c3', 'i2'), comment('c4', 'i2')].map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8')
     expect((await loadIndex(root, 'douyin')).comments.get('i2')).toHaveLength(2)
+  })
+
+  it('cache 有上限并按 LRU 淘汰，命中会刷新位置', async () => {
+    process.env.OMC_RECORDS_CACHE_MAX = '2'
+    try {
+      const a = await tempDir('omc-lru-a-')
+      const b = await tempDir('omc-lru-b-')
+      const c = await tempDir('omc-lru-c-')
+      const ia = await loadIndex(a, 'xhs')
+      const ib = await loadIndex(b, 'xhs')
+      expect(recordCacheStats()).toEqual({ size: 2, max: 2 })
+
+      // 命中 A，把 B 挤到最旧；再加载 C 时应该淘汰 B。
+      expect(await loadIndex(a, 'xhs')).toBe(ia)
+      await loadIndex(c, 'xhs')
+      expect(recordCacheStats().size).toBe(2)
+      expect(await loadIndex(a, 'xhs')).toBe(ia)
+      expect(await loadIndex(b, 'xhs')).not.toBe(ib)
+    } finally {
+      delete process.env.OMC_RECORDS_CACHE_MAX
+      resetRecordCache()
+    }
   })
 })
 

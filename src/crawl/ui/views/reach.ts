@@ -73,6 +73,11 @@ export const reach: View = {
 .reach-chat-peer>b{font-size:var(--fs);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .reach-msgs{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:var(--s3);background:var(--bg)}
 .reach-msgs-empty{display:flex;flex-direction:column;justify-content:center;height:100%}
+.reach-bub.has-media{max-width:min(360px,80%)}
+.reach-bub-imgwrap{display:block;line-height:0;border-radius:var(--r-sm);overflow:hidden}
+.reach-bub-img{display:block;max-width:100%;max-height:240px;width:auto;height:auto;border-radius:var(--r-sm);background:var(--bg);object-fit:cover;cursor:zoom-in}
+.reach-bub-video{display:block;max-width:100%;max-height:240px;border-radius:var(--r-sm);background:#000}
+.reach-bub-img + .reach-bub-img,.reach-bub-imgwrap + .reach-bub-imgwrap{margin-top:var(--s1)}
 .reach-msg{display:flex;margin-bottom:var(--s2)}
 .reach-msg.is-out{justify-content:flex-end}
 .reach-msg.is-in{justify-content:flex-start}
@@ -110,6 +115,7 @@ export const reach: View = {
     <div class="card">
       <div class="row reach-bar">
         <button class="danger sm" id="reachCandBulk" type="button">移除所选</button>
+        <button class="ghost sm" id="reachRemoveSent" type="button" title="把发送账本里已经私聊成功的人从候选池移除，账本不动">移除已私聊</button>
         <button class="ghost sm" id="reachClearReply" type="button">清空回复候选</button>
         <button class="ghost sm" id="reachClearDm" type="button">清空私信候选</button>
         <span class="spacer"></span>
@@ -119,7 +125,7 @@ export const reach: View = {
         <table class="tbl">
           <thead><tr>
             <th class="sel"><input type="checkbox" id="reachCandAll" aria-label="全选候选"></th>
-            <th>类型</th><th>平台</th><th>对象</th><th>备注</th><th></th>
+            <th>类型</th><th>平台</th><th>对象</th><th>状态</th><th>备注</th><th></th>
           </tr></thead>
           <tbody id="reachCandBody"></tbody>
         </table>
@@ -257,6 +263,7 @@ export const reach: View = {
         </div>
         <button class="ghost sm" id="reachChatReload" type="button">刷新</button>
         <button class="ghost sm" id="reachChatSync" type="button" disabled>同步历史</button>
+        <button class="ghost sm" id="reachChatClear" type="button" disabled title="只清本地记录，不动平台">清空记录</button>
       </div>
       <p class="reach-chat-note" id="reachChatNote" hidden></p>
       <div class="reach-msgs" id="reachChatMsgs">
@@ -265,6 +272,7 @@ export const reach: View = {
       </div>
       <form class="reach-composer" id="reachChatForm">
         <textarea id="reachChatText" rows="2" maxlength="500" placeholder="先在左边选一个会话…" disabled></textarea>
+        <input id="reachChatImage" type="text" autocomplete="off" placeholder="附图 URL（可多个，逗号分隔；留空只发文字）" disabled>
         <div class="reach-comp-bar">
           <span class="tiny num" id="reachChatCount">0 / 500</span>
           <span class="tiny">Enter 发送，Shift+Enter 换行</span>
@@ -356,11 +364,23 @@ function reachCandTarget(c){
   return who+(c.type==='reply'?'评论 ':'用户 ')+id;
 }
 
+/* 私聊状态：账本里有成功的私信记录才算（后端读 /api/candidates 时关联，账本是唯一真源）。 */
+function reachCandStatus(c){
+  if(c&&c.dm_sent_at){
+    var when=fmtTime(c.dm_sent_at)||String(c.dm_sent_at);
+    return '<span class="badge ok" title="'+esc('已私聊：'+when)+'">已私聊</span>';
+  }
+  return '<span class="tiny" title="还没有成功发出私信">—</span>';
+}
+
 function reachRenderCandidates(){
   var body=$('#reachCandBody'),wrap=$('#reachCandWrap'),empty=$('#reachCandEmpty'),sum=$('#reachCandSummary');
-  var reply=0,dm=0,i,c;
-  for(i=0;i<reachCands.length;i++){if(reachCands[i].type==='dm')dm++;else reply++}
-  if(sum)sum.textContent='回复 '+reply+' 条 · 私信 '+dm+' 条';
+  var reply=0,dm=0,sent=0,i,c;
+  for(i=0;i<reachCands.length;i++){
+    if(reachCands[i].type==='dm'){dm++;if(reachCands[i].dm_sent_at)sent++}
+    else reply++;
+  }
+  if(sum)sum.textContent='回复 '+reply+' 条 · 私信 '+dm+' 条'+(sent?' · 已私聊 '+sent+' 条':'');
   if(!reachCands.length){
     if(body)body.innerHTML='';
     if(wrap)wrap.hidden=true;
@@ -383,6 +403,7 @@ function reachRenderCandidates(){
       '<td><span class="badge">'+(c.type==='reply'?'回复':'私信')+'</span></td>'+
       '<td class="mono tiny">'+esc(c.platform)+'</td>'+
       '<td class="tx" title="'+esc(target)+'">'+esc(target)+'</td>'+
+      '<td>'+reachCandStatus(c)+'</td>'+
       '<td class="tx" title="'+esc(note)+'">'+esc(note)+'</td>'+
       '<td><span class="reach-cand-ops">'+chatBtn+
         '<button class="danger sm" type="button" data-del="'+esc(c.id)+'">移除</button>'+
@@ -470,6 +491,34 @@ async function reachRemoveSelected(){
   await reachLoadCandidates();
   if(fail)reachShow(msg,'移除 '+ok+' 条，失败 '+fail+' 条：'+firstError);
   else{reachShow(msg,'');toast('已移除 '+ok+' 条候选')}
+}
+
+/* 只从候选池里删掉「已经私聊成功」的人；发送账本（sent.jsonl）不动，
+   否则这些号会被当成没发过、被群发再发一遍。 */
+async function reachRemoveSent(){
+  var ids=[],i,msg=$('#reachCandMsg');
+  for(i=0;i<reachCands.length;i++){
+    if(reachCands[i].type==='dm'&&reachCands[i].dm_sent_at)ids.push(reachCands[i].id);
+  }
+  if(!ids.length){reachShow(msg,'候选池里没有已私聊的人。');return}
+  if(!confirm('把已私聊的 '+ids.length+' 个人从候选池移除？\n\n只删候选池里的这几条，发送记录（sent.jsonl）保留，不影响群发去重。'))return;
+  var btn=$('#reachRemoveSent');
+  if(btn)btn.disabled=true;
+  var ok=0,fail=0,firstError='';
+  for(i=0;i<ids.length;i++){
+    try{
+      await api('/api/candidates/'+encodeURIComponent(ids[i]),{method:'DELETE'});
+      delete reachCandSel[ids[i]];
+      ok++;
+    }catch(e){
+      fail++;
+      if(!firstError)firstError=e.message;
+    }
+  }
+  if(btn)btn.disabled=false;
+  await reachLoadCandidates();
+  if(fail)reachShow(msg,'移除 '+ok+' 条，失败 '+fail+' 条：'+firstError);
+  else{reachShow(msg,'');toast('已从候选池移除 '+ok+' 条（发送记录保留）')}
 }
 
 async function reachClearCandidates(type){
@@ -1105,13 +1154,35 @@ async function reachLoadThreads(){
   }
 }
 
+function reachMediaHtml(m){
+  var list=(m&&m.media)||[],html='',i,one,url;
+  if(!list.length)return '';
+  for(i=0;i<list.length;i++){
+    one=list[i]||{};
+    url=String(one.url||'');
+    // 只认 http(s)：本地路径浏览器打不开，渲染出来是破图
+    if(!/^https?:\/\//i.test(url))continue;
+    if(String(one.type||'').indexOf('video')>=0){
+      html+='<video class="reach-bub-video" src="'+esc(url)+'" controls preload="metadata"></video>';
+    }else{
+      html+='<a class="reach-bub-imgwrap" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+
+        '<img class="reach-bub-img" src="'+esc(url)+'" alt="图片消息" loading="lazy" referrerpolicy="no-referrer"></a>';
+    }
+  }
+  return html;
+}
+
 function reachBubble(m){
   var out=!!(m&&m.direction==='out');
   var fail=out&&m&&m.status==='failed';
   var t=m&&m.at?fmtTime(m.at):'';
+  var text=m&&m.text?String(m.text):'';
+  var media=reachMediaHtml(m);
+  // 纯图片消息没有文本，别渲染一个空文本框把气泡撑成一条线
+  var textHtml=text?'<div class="reach-bub-text">'+esc(text)+'</div>':'';
   return '<div class="reach-msg '+(out?'is-out':'is-in')+'">'+
-    '<div class="reach-bub'+(fail?' is-fail':'')+'">'+
-      '<div class="reach-bub-text">'+esc(m&&m.text)+'</div>'+
+    '<div class="reach-bub'+(fail?' is-fail':'')+(media?' has-media':'')+'">'+
+      textHtml+media+
       '<div class="reach-bub-meta"><span>'+esc(t)+'</span>'+(fail?'<span class="reach-bub-fail">发送失败</span>':'')+'</div>'+
     '</div>'+
   '</div>';
@@ -1194,9 +1265,12 @@ async function reachChatSend(ev){
   var cur=reachChat;
   if(cur.sending)return;
   if(!cur.platform||!cur.peerId){reachChatNote('先选一个会话：左边列表，或回候选池点「打开会话」。',true);return}
-  var ta=$('#reachChatText'),btn=$('#reachChatSend');
+  var ta=$('#reachChatText'),btn=$('#reachChatSend'),imgEl=$('#reachChatImage');
   var text=ta?String(ta.value||'').trim():'';
-  if(!text){reachChatNote('内容不能为空',true);if(ta)ta.focus();return}
+  var images=(imgEl?String(imgEl.value||''):'').split(/[,\n]/).map(function(one){return one.trim()}).filter(Boolean).slice(0,9);
+  var bad=images.filter(function(one){return !/^https?:\/\//i.test(one)});
+  if(bad.length){reachChatNote('附图只支持 http(s) 链接：'+bad[0],true);return}
+  if(!text&&!images.length){reachChatNote('内容不能为空（文字或附图至少给一个）',true);if(ta)ta.focus();return}
   if(text.length>500){reachChatNote('最多 500 字，现在 '+text.length+' 字',true);return}
   var platform=cur.platform,peerId=cur.peerId,peerName=cur.peerName;
   var same=function(){return reachChat.platform===platform&&reachChat.peerId===peerId};
@@ -1205,9 +1279,10 @@ async function reachChatSend(ev){
   if(ta)ta.disabled=true;
   reachChatNote('');
   try{
-    await post('/api/chat/send',{platform:platform,peerId:peerId,peerName:peerName||undefined,text:text});
+    await post('/api/chat/send',{platform:platform,peerId:peerId,peerName:peerName||undefined,text:text,images:images});
     if(same()){
       if(ta)ta.value='';
+      if(imgEl)imgEl.value='';
       reachChatCount();
     }
     reachChatNote('已发送。同一账号 3 秒内不能连发，下一条稍等。');
@@ -1274,6 +1349,7 @@ if($('#reachTplDel'))$('#reachTplDel').onclick=reachDeleteTpl;
 $('#reachCampStop').onclick=reachStopCampaign;
 $('#reachCampType').onchange=reachUpdateMeta;
 $('#reachCandBulk').onclick=reachRemoveSelected;
+if($('#reachRemoveSent'))$('#reachRemoveSent').onclick=reachRemoveSent;
 $('#reachClearReply').onclick=function(){reachClearCandidates('reply')};
 $('#reachClearDm').onclick=function(){reachClearCandidates('dm')};
 $('#reachGoCrawl').onclick=function(){omc.go('crawl')};
@@ -1314,6 +1390,17 @@ if($('#reachThreadList'))$('#reachThreadList').onclick=function(ev){
 };
 $('#reachChatReload').onclick=reachChatRefresh;
 $('#reachChatSync').onclick=reachChatSync;
+$('#reachChatClear').onclick=function(){
+  var cur=reachChat;
+  if(!cur.platform||!cur.peerId){toast('先选一个会话','err');return}
+  if(!window.confirm('清空本地聊天记录？这只会删本工具里的记录，不影响抖音/小红书上的消息。\n清完可以点「同步历史」重新拉一份干净的。'))return;
+  var btn=this;
+  post('/api/chat/clear',{platform:cur.platform,peerId:cur.peerId,confirm:true}).then(function(r){
+    toast('已清空 '+(r&&r.removed!=null?r.removed:0)+' 条');
+    reachChatLoadMessages();
+    reachLoadThreads();
+  },function(e){toast('清空失败：'+e.message,'err')});
+};
 $('#reachChatForm').onsubmit=reachChatSend;
 $('#reachChatText').oninput=reachChatCount;
 $('#reachChatText').onkeydown=function(ev){

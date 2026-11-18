@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -30,7 +30,7 @@ let dir = ''
 const saved: Record<string, string | undefined> = {}
 
 beforeEach(() => {
-  for (const key of ['OMC_USERS_FILE', 'OMC_HOME', 'OMC_ADMIN_PASSWORD']) {
+  for (const key of ['OMC_USERS_FILE', 'OMC_HOME', 'OMC_ADMIN_PASSWORD', 'OMC_DATA_DIR']) {
     saved[key] = process.env[key]
     delete process.env[key]
   }
@@ -172,6 +172,44 @@ describe('users', () => {
     await makeUser('boss2', PASSWORD, 'admin')
     await removeUser('boss2')
     expect((await listUsers()).map((u) => u.username)).toEqual(['boss'])
+  })
+
+  it('removeUser 默认保留数据目录，purgeData 才删；路径越界一律拒绝', async () => {
+    await makeUser('keeper')
+    await makeUser('purge')
+    const dataRoot = join(dir, 'data-output')
+    const keeperDir = join(dataRoot, 'users', 'keeper')
+    const purgeDir = join(dataRoot, 'users', 'purge')
+    mkdirSync(keeperDir, { recursive: true })
+    mkdirSync(purgeDir, { recursive: true })
+    writeFileSync(join(keeperDir, 'keep.jsonl'), '{}\n')
+    writeFileSync(join(purgeDir, 'gone.jsonl'), '{}\n')
+
+    await removeUser('keeper')
+    expect(existsSync(keeperDir)).toBe(true)
+    expect((await listUsers()).some((u) => u.username === 'keeper')).toBe(false)
+
+    await removeUser('purge', { purgeData: true, dataRoot })
+    expect(existsSync(purgeDir)).toBe(false)
+
+    const victim = join(dir, 'victim')
+    mkdirSync(victim, { recursive: true })
+    writeFileSync(join(victim, 'secret.txt'), 'do not delete\n')
+    for (const bad of ['../victim', '..', '.', '', join(dir, 'victim'), 'a/b', 'a\\b']) {
+      await expectCatbusError(removeUser(bad, { purgeData: true, dataRoot }), 'USAGE')
+    }
+    expect(existsSync(join(victim, 'secret.txt'))).toBe(true)
+  })
+
+  it('purgeData 没给 dataRoot 时默认用 OMC_DATA_DIR（再退回 ./data）', async () => {
+    await makeUser('envuser')
+    const dataRoot = join(dir, 'env-output')
+    process.env.OMC_DATA_DIR = dataRoot
+    const userDir = join(dataRoot, 'users', 'envuser')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(join(userDir, 'x.jsonl'), '{}\n')
+    await removeUser('envuser', { purgeData: true })
+    expect(existsSync(userDir)).toBe(false)
   })
 
   it('ensureAdmin 只在首次创建，尊重 OMC_ADMIN_PASSWORD', async () => {

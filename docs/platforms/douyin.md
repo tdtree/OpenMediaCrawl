@@ -115,7 +115,8 @@
 |---|---|---|
 | `msg send` | ✓ | 发私信。`--to <用户>` 或 `--conversation`（形如 `0:1:<uid>:<uid>`）；发视频时要用 `--image` 给一张封面；需要 bd-ticket-guard 私钥（扫码登录时自动生成，cookie 导入时要在 JSON 里一并给出）。私有选项 `--file`、`--share`。 |
 | `msg listen` | ✓ | 监听新消息。持续输出 jsonl。 |
-| `msg list`、`msg history`、`msg read`、`msg revoke`、`msg delete` | ○ | 规划中 |
+| `msg list` | ✓ | 会话列表。私有选项 `--folder main\|request\|all`：`main`（默认）是已建立的会话，`request` 是陌生人发来的「消息请求」箱（对方没接受前不会进主会话列表），`all` 合并两者。 |
+| `msg history`、`msg read`、`msg revoke`、`msg delete` | ○ | 规划中 |
 
 ### media
 
@@ -154,6 +155,7 @@
 | `item publish` | `--poi-name <名称>`、`--series <合集 id>`、`--hotspot <热点词>`、`--no-download` | 地点名称（配合 `--poi`）、加入合集、关联热点、不允许别人下载 |
 | `item collect` / `uncollect` | `--folder <收藏夹 ID 或名字>` | 收藏后移进这个收藏夹 / 只从这个收藏夹移出（仍保留收藏） |
 | `msg send` | `--file <路径或 URL>`、`--share <作品、用户或网页>` | 发文件（≤10MB）；分享作品 / 用户名片 / 网页卡片 |
+| `msg list` | `--folder main\|request\|all` | 会话箱：已建立的会话（默认） / 陌生人的「消息请求」 / 两者合并 |
 | `live rank` | `--ranking contribution\|thousand` | 榜单：贡献榜（默认） / 千票榜 |
 | `live like` | `--count N` | 一次点赞的次数，默认 1 |
 | `comment list` | `--label <标签名或 id>` | 商品评价按标签筛选（好评、差评、有图等），只用于商品评价 |
@@ -211,5 +213,7 @@ catbus douyin comment list "<product_url>" --label 差评
 - **点赞可能连累登录态**：实测不带 dtrait 点赞返回 HTTP 403，之后登录态被踢，只能重新扫码。点赞、收藏、评论、私信、直播发言都还没有真机验证通过，请谨慎在常用账号上尝试。
 - **综合搜索的筛选还没真机验证**：上游 `c28ee5f` 起综合频道把筛选值放进 `filter_selected` 发出（`--type image` 也随之恢复），catbus 已同步，但结果是否真的按筛选返回还没在真机上确认。
 - **字段恒为空**：作品的 `title`（抖音作品只有描述，放在 `text`）、列表里的 `stats.views`。
-- **还没真机验证**：上面的写操作，以及 `msg listen`、`live listen` / `like`、`product get`、`item download`、`media upload`。
+- **陌生人私信不进主会话列表**：对方没关注你、或你们还没互发过消息时，私信落在「消息请求」箱，`msg list` 默认（`--folder main`）看不到，要用 `--folder request`；`msg listen` 也收不到这一类消息。
+- **`msg list` 的上游路径还没有真机对拍**：主会话走 cmd 203（先 `/v2/message/get_by_user_init`，拿不到回包体再试网页端的 `/v1/message/get_message_by_init`），消息请求箱走 cmd 2047（`/v1/message/get_recent_stranger_message`）。回包按 IM 的 protobuf 定义解码，字段映射有离线测试（构造的回包），但还没有真实账号的录制数据；拿不到回包体时一律报 `UPSTREAM`，不会静默返回空列表。
+- **还没真机验证**：上面的写操作，以及 `msg list`、`msg listen`、`live listen` / `like`、`product get`、`item download`、`media upload`。
 - 抖音的 PK、连麦、评论标签不提供，见 [AGENTS.md 4.12](../../AGENTS.md#412-不提供的能力)。

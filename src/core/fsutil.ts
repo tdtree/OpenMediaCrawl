@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -37,6 +37,21 @@ export async function readTextIfExists(file: string): Promise<string | null> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw err
+  }
+}
+
+/**
+ * 文件指纹：`路径:mtimeMs:大小`，文件不存在时记 `路径:0:0`。
+ *
+ * 内存缓存用它判断「文件被改过没有」：命中就不用再整读一遍；
+ * 不存在也算一种确定状态，之后被创建 / 删除都会让指纹变化。
+ */
+export async function fileSignature(file: string): Promise<string> {
+  try {
+    const info = await stat(file)
+    return `${file}:${info.mtimeMs}:${info.size}`
+  } catch {
+    return `${file}:0:0`
   }
 }
 

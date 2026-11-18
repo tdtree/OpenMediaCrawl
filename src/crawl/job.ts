@@ -37,6 +37,11 @@ function stopsJob(error: unknown): boolean {
   return error instanceof CatbusError && ['AUTH_REQUIRED', 'AUTH_EXPIRED', 'RISK_CONTROL'].includes(error.code)
 }
 
+/** 平台压根没有这个能力（注册表标 none 的 comment list）：不是失败，记下来照常跑完。 */
+function isUnsupported(error: unknown): boolean {
+  return error instanceof CatbusError && ['UNSUPPORTED', 'NOT_IMPLEMENTED'].includes(error.code)
+}
+
 export async function retry<T>(fn: () => Promise<T>, retries = 2, baseMs = 2000): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try { return await fn() } catch (error) {
@@ -123,6 +128,8 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
   const range = parseSleep(options.sleep)
   const emit = (type: CrawlEvent['type'], message: string, data?: unknown) => deps.onEvent?.({ type, message, data, time: new Date().toISOString() })
   const counts = { items: 0, comments: 0, creators: 0, skipped: 0, newComments: 0, reusedItems: 0, reusedComments: 0, reusedMedia: 0 }
+  /** 平台没有 `comment list` 时就别每条作品都试一次；也不该因此把整个任务判失败。 */
+  let commentsUnsupported = false
   const client = deps.client
   /** 每个可中断点都检查一次：停止最多等到当前这一条处理完。 */
   const stopped = (): void => { if (deps.signal?.aborted) throw new CrawlStoppedError() }
@@ -319,40 +326,49 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
     await save({ platform, kind: 'item', id: seedId, data: content ? thinItem(item) : item })
 
     // ---- 评论 ----
-    if (options.comments) {
-      const commentState = content?.getCommentsState(platform, seedId) ?? null
-      const commentDecision = content
-        ? decideReuse(
-          { item: null, comments: commentState, media: null },
-          { wantComments: true, wantSubComments: options.subComments, wantMedia: false, maxComments: options.maxComments },
-          policy,
-        )
-        : null
-      if (content && commentDecision && !commentDecision.fetchComments) {
-        counts.reusedComments += content.commentCount(platform, seedId)
-        logFetch(seedId, 'comments', 'reused')
-      } else {
-        emit('log', `拉取评论 ${seedId}（${options.maxComments > 0 ? `最多 ${options.maxComments} 条` : '不限，热门作品可能很慢'}）`)
-        const startedAt = Date.now()
-        const didWork = await withClaim(seedId, 'comments', startedAt, () => {
-          const ready = content?.getCommentsState(platform, seedId)
-          return Boolean(ready && ready.fetchedAt >= startedAt - 1000)
-        }, async () => {
-          if (content) {
-            const { list, complete, withReplies } = await collectComments(item)
-            const written = content.putComments(platform, seedId, list, { limit: options.maxComments, complete, withReplies })
-            counts.comments += list.length
-            counts.newComments += written.added
-            if (written.added > 0) emit('log', `评论 ${seedId}：新增 ${written.added} 条（本次抓到 ${list.length} 条，库里共 ${written.total} 条）`)
-            logFetch(seedId, 'comments', 'fetched')
-          } else {
-            await processCommentsLegacy(item)
-          }
-        })
-        if (!didWork) {
-          counts.reusedComments += content?.commentCount(platform, seedId) ?? 0
+    if (options.comments && commentsUnsupported) {
+      // 前面已经确认这个平台没有 `comment list`，别再一条作品试一次。
+    } else if (options.comments) {
+      try {
+        const commentState = content?.getCommentsState(platform, seedId) ?? null
+        const commentDecision = content
+          ? decideReuse(
+            { item: null, comments: commentState, media: null },
+            { wantComments: true, wantSubComments: options.subComments, wantMedia: false, maxComments: options.maxComments },
+            policy,
+          )
+          : null
+        if (content && commentDecision && !commentDecision.fetchComments) {
+          counts.reusedComments += content.commentCount(platform, seedId)
           logFetch(seedId, 'comments', 'reused')
+        } else {
+          emit('log', `拉取评论 ${seedId}（${options.maxComments > 0 ? `最多 ${options.maxComments} 条` : '不限，热门作品可能很慢'}）`)
+          const startedAt = Date.now()
+          const didWork = await withClaim(seedId, 'comments', startedAt, () => {
+            const ready = content?.getCommentsState(platform, seedId)
+            return Boolean(ready && ready.fetchedAt >= startedAt - 1000)
+          }, async () => {
+            if (content) {
+              const { list, complete, withReplies } = await collectComments(item)
+              const written = content.putComments(platform, seedId, list, { limit: options.maxComments, complete, withReplies })
+              counts.comments += list.length
+              counts.newComments += written.added
+              if (written.added > 0) emit('log', `评论 ${seedId}：新增 ${written.added} 条（本次抓到 ${list.length} 条，库里共 ${written.total} 条）`)
+              logFetch(seedId, 'comments', 'fetched')
+            } else {
+              await processCommentsLegacy(item)
+            }
+          })
+          if (!didWork) {
+            counts.reusedComments += content?.commentCount(platform, seedId) ?? 0
+            logFetch(seedId, 'comments', 'reused')
+          }
         }
+      } catch (error) {
+        if (!isUnsupported(error)) throw error
+        commentsUnsupported = true
+        logFetch(seedId, 'comments', 'skipped')
+        emit('log', `该平台暂不支持评论采集（${error instanceof Error ? error.message : String(error)}）`)
       }
     }
 
@@ -471,7 +487,16 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
     if (content && (counts.reusedItems || counts.reusedComments || counts.reusedMedia)) {
       emit('log', `复用：作品 ${counts.reusedItems} 条、评论 ${counts.reusedComments} 条、媒体 ${counts.reusedMedia} 个（没有重复请求平台）`)
     }
-    return { jobId: `${platform}-${options.type}-${Date.now()}`, platform, type: options.type, counts, files: storage.files(), stateFile: path }
+    if (commentsUnsupported) emit('log', `注意：${platform} 暂不支持评论采集（CLI 没有 comment list），这次只采了作品`)
+    return {
+      jobId: `${platform}-${options.type}-${Date.now()}`,
+      platform,
+      type: options.type,
+      counts,
+      files: storage.files(),
+      stateFile: path,
+      ...(commentsUnsupported ? { commentsUnsupported: true } : {}),
+    }
   } catch (error) {
     emit('error', error instanceof Error ? error.message : String(error))
     throw error

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 export type ActionKind = 'comment' | 'dm'
 
-export interface ActionInput { platform: string; kind: ActionKind; target: string; text: string; replyTo?: string; account?: string }
+export interface ActionInput { platform: string; kind: ActionKind; target: string; text: string; replyTo?: string; account?: string; user?: string; /** 私信附图：本地路径或 http(s) URL，逐个传成 --image */ media?: string[] }
 export interface ActionDeps { bin?: string; env?: NodeJS.ProcessEnv; now?: () => number; minIntervalMs?: number }
 export type ActionResult = { ok: true; data: unknown } | { ok: false; code: string; message: string }
 
@@ -28,6 +28,15 @@ const DEFAULT_TIMEOUT_MS = 60_000
 /** 上次真正发起动作的时间（毫秒），key 为 `平台:账号`。被限流的调用不写这里。 */
 const lastStartedAt = new Map<string, number>()
 
+/**
+ * 限流作用域：用户维度 + 登录态目录。Web UI 里每个用户有独立的 CATBUS_HOME，
+ * 只看目录就足以隔离；显式传入的 user 再兜一层，调用方没有独立目录时也能按用户隔离。
+ * 两者都没有时退回空作用域（与旧行为一致）。
+ */
+function actionScope(input: ActionInput, env: NodeJS.ProcessEnv): string {
+  return `${input.user?.trim() ?? ''}\u0000${env.CATBUS_HOME?.trim() ?? ''}`
+}
+
 /** 清空限流记录，主要给测试和「换账号」这类场景用。 */
 export function resetActionLimiter(): void { lastStartedAt.clear() }
 
@@ -50,7 +59,8 @@ function buildActionArgs(input: ActionInput, text: string, target: string): stri
   if (input.kind === 'comment') {
     return [...head, 'comment', 'add', target, text, ...(replyTo ? ['--reply-to', replyTo] : []), '-o', 'json']
   }
-  return [...head, 'msg', 'send', text, '--to', target, '-o', 'json']
+  const media = (input.media ?? []).map((m) => m.trim()).filter(Boolean)
+  return [...head, 'msg', 'send', text, '--to', target, ...media.flatMap((m) => ['--image', m]), '-o', 'json']
 }
 
 /** stderr 可能是一整段 Node 栈，消息里只留开头，免得把 UI 撑爆。 */
@@ -84,7 +94,9 @@ export async function runAction(input: ActionInput, deps: ActionDeps = {}): Prom
   if (!platforms.includes(input.platform)) return { ok: false, code: 'UNSUPPORTED', message: `${input.platform} 不支持${label}` }
 
   const text = (input.text ?? '').trim()
-  if (!text) return { ok: false, code: 'USAGE', message: `${label}内容不能为空` }
+  const hasMedia = (input.media ?? []).some((m) => String(m ?? '').trim())
+  // 私信允许「只发图不写字」，评论必须有正文。
+  if (!text && !(input.kind === 'dm' && hasMedia)) return { ok: false, code: 'USAGE', message: `${label}内容不能为空` }
   if (text.length > MAX_TEXT_LENGTH) return { ok: false, code: 'USAGE', message: `${label}内容超过 ${MAX_TEXT_LENGTH} 字（当前 ${text.length} 字）` }
 
   const target = (input.target ?? '').trim()
@@ -92,7 +104,7 @@ export async function runAction(input: ActionInput, deps: ActionDeps = {}): Prom
 
   const now = deps.now ?? Date.now
   const minIntervalMs = deps.minIntervalMs ?? readNumber(env.MEDIACRAWL_ACTION_INTERVAL_MS, DEFAULT_MIN_INTERVAL_MS, 0)
-  const key = `${input.platform}:${input.account ?? 'default'}`
+  const key = `${actionScope(input, env)}\u0000${input.platform}:${input.account ?? 'default'}`
   const startedAt = lastStartedAt.get(key)
   const at = now()
   if (startedAt !== undefined && at - startedAt < minIntervalMs) {

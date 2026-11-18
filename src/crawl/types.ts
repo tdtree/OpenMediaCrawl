@@ -72,6 +72,8 @@ export interface CrawlResult {
   }
   files: string[]
   stateFile: string
+  /** 这个平台没有 `comment list`（CLI 报 UNSUPPORTED / NOT_IMPLEMENTED）：评论没采，其余照常。 */
+  commentsUnsupported?: boolean
 }
 
 export function pageItems<T>(value: SearchPage<T> | T[]): SearchPage<T> {

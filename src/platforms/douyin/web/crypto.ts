@@ -38,13 +38,61 @@ function randrange(order = P256_ORDER): bigint {
   }
 }
 
-/** 私钥标量：接受 PEM（SEC1 / PKCS8）或十六进制。 */
+/**
+ * 私钥 PEM 归一化。
+ *
+ * 实测踩坑（Docker 部署，网页「粘贴 Cookie」导入五件套）：经过剪贴板/网页
+ * 表单转一圈后，PEM 的换行会变成**字面量 `\n`**（两个字符），甚至叠两层
+ * `\\n`，还会夹进多余反斜杠。此时 base64 里混着 `n` 字符，OpenSSL 直接报
+ * `error:1E08010C:DECODER routines::unsupported`（ERR_OSSL_UNSUPPORTED），
+ * 表现为「发消息失败但看不出原因」。
+ *
+ * 这里按「先解转义 → 只留 base64 → 按 64 列重排」重建 PEM，
+ * 只要密钥内容完整，无论被转义几层都能救回来。
+ */
+export function normalizePem(input: string): string {
+  let s = String(input ?? '')
+  if (!s.trim()) return s
+  // 反复解转义：\\n → \n（字面量）→ 真换行
+  for (let i = 0; i < 3 && /\\[rn]|\\\\[rn]/.test(s); i++) {
+    s = s.replace(/\\\\n/g, '\\n').replace(/\\\\r/g, '\\r')
+  }
+  s = s.replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+  if (!s.includes('-----BEGIN')) return s.trim() // 裸标量 / hex，原样返回
+  const body = s.replace(/-----[^-]*-----/g, '').replace(/[^A-Za-z0-9+/=]/g, '')
+  if (!body) return s.trim()
+  const header = /EC PRIVATE KEY/.test(s) ? 'EC PRIVATE KEY' : 'PRIVATE KEY'
+  const lines = body.match(/.{1,64}/g) ?? [body]
+  return `-----BEGIN ${header}-----\n${lines.join('\n')}\n-----END ${header}-----\n`
+}
+
+/** 解析私钥：先归一化，再在 PKCS8 / SEC1 两种头之间回退。 */
+function toPrivateKey(pem: string) {
+  const norm = normalizePem(pem)
+  const variants = [norm]
+  if (norm.includes('BEGIN PRIVATE KEY')) variants.push(norm.replace('PRIVATE KEY', 'EC PRIVATE KEY'))
+  else if (norm.includes('BEGIN EC PRIVATE KEY')) variants.push(norm.replace('EC PRIVATE KEY', 'PRIVATE KEY'))
+  let lastErr: unknown
+  for (const v of variants) {
+    try {
+      return createPrivateKey(v)
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw new Error(
+    `bd-ticket-guard 私钥无法解析（${(lastErr as Error)?.message ?? '未知错误'}）。` +
+      '多半是粘贴时换行被转义或字符丢失：请重新扫码登录，或把完整 dy.json 粘到「Cookie」大框里重新导入。',
+  )
+}
+
+/** 私钥标量：接受 PEM（SEC1 / PKCS8，允许换行被转义）或十六进制。 */
 function privateScalar(prv: string): bigint {
   if (prv.includes('-----BEGIN')) {
-    const jwk = createPrivateKey(prv).export({ format: 'jwk' }) as { d: string }
+    const jwk = toPrivateKey(prv).export({ format: 'jwk' }) as { d: string }
     return toBig(Buffer.from(jwk.d, 'base64url'))
   }
-  return BigInt('0x' + prv.trim())
+  return BigInt('0x' + normalizePem(prv).trim())
 }
 
 /** k·G 的未压缩点（借 ECDH 做标量乘）。 */

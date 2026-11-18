@@ -124,7 +124,10 @@ export default definePlatform({
         }),
         'notice count': 'none',
 
-        'msg list': 'none',
+        'msg list': read('full', 'msgList', {
+          note: '--folder request 是陌生人 / 消息请求箱；对方的昵称只有会话回包给了才填',
+          options: { folder: z.enum(['main', 'request', 'all']).default('main').describe('会话箱：主会话 / 消息请求（陌生人）/ 两者合并') },
+        }),
         'msg history': 'none',
         'msg send': write('full', 'msgSend', {
           options: {

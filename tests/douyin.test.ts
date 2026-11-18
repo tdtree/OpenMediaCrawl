@@ -403,6 +403,40 @@ describe('douyin 对拍：长连接', () => {
     const msg = live.imFrame(new Uint8Array(Buffer.from(loadCase('douyin', 'im_push').result.frame, 'base64')))
     expect(msg).toMatchObject({ id: '7400000000000000777', conversation_id: CONV_ID, from: { id: '1234567890' }, type: 'text', text: '你好呀' })
   })
+
+  it('私信 listen：重连重放的同一条消息只输出一次，字符串帧 / 心跳帧跳过', async () => {
+    const frame = Buffer.from(loadCase('douyin', 'im_push').result.frame, 'base64')
+    const ctx = makeCtx({ platform: 'douyin' })
+    const frames = async function* (): AsyncGenerator<string | Buffer> {
+      yield frame
+      yield '这不是二进制帧'
+      yield Buffer.from(live.heartbeatFrame())
+      yield frame // 重连后服务端重放
+      yield frame
+    }
+    const ids = async (recent: live.RecentIds | null) => {
+      const out: string[] = []
+      for await (const m of live.frameMessages(ctx, frames(), recent)) out.push(m.id)
+      return out
+    }
+    expect(await ids(new live.RecentIds())).toEqual(['7400000000000000777'])
+    // 关掉去重（recent 为 null）：三帧同一条消息原样输出三遍
+    expect(await ids(null)).toEqual(['7400000000000000777', '7400000000000000777', '7400000000000000777'])
+  })
+
+  it('私信 listen：去重窗口有界（默认 2000，超出丢最早的）；没有 server_message_id 的帧不参与去重', () => {
+    const recent = new live.RecentIds(3)
+    expect([recent.add('1'), recent.add('2'), recent.add('1'), recent.add('3')]).toEqual([true, true, false, true])
+    expect(recent.size).toBe(3)
+    expect(recent.add('4')).toBe(true) // 挤掉 '1'
+    expect(recent.size).toBe(3)
+    expect(recent.add('1')).toBe(true) // 已经出窗口，重新认识
+    expect(recent.size).toBe(3)
+    // 空 id / 0：服务端没给 id，去重会把不同的消息并成一条，所以一律放行且不记
+    expect([recent.add(''), recent.add(''), recent.add('0'), recent.add('0')]).toEqual([true, true, true, true])
+    expect(recent.size).toBe(3)
+    expect(new live.RecentIds().add('1')).toBe(true)
+  })
 })
 
 describe('douyin 归一化（真实响应的结构）', () => {
@@ -1299,5 +1333,202 @@ describe('douyin 归一化：IP 属地', () => {
     expect(withIp.province).toBe('辽宁')
     const noIp = comment({ cid: '2', aweme_id: '9', text: 'y', user: { uid: 'u', nickname: 'n' } }, '9')
     expect(noIp.province).toBeUndefined()
+  })
+})
+
+// ================================================================ 会话列表（msg list）
+
+/**
+ * 这些回包是按 imapi 的 IM protobuf（cmd 203 / 2047）**构造**的，不是录制夹具：
+ * 手头没有这两个接口的真实回包（网页端与桌面端的路径还不一样），所以只验证解码、字段映射与错误处理。
+ */
+describe('douyin 会话列表：解码、字段映射与错误处理', () => {
+  useTempHome()
+
+  const MY_UID = '97872126662'
+  const PEER_UID = '1234567890'
+  const PEER_SEC = 'MS4wLjABAAAApeerSecUid0123456789'
+  const CONV_MAIN = '0:1:97872126662:1234567890'
+  const CONV_SELF = '0:1:97872126662:5550001'
+
+  /** body 用 oneof 的字段名（`inbox` / `get_recent_stranger_message`），cmd 按字段名反推。 */
+  const IM_CMD: Record<string, number> = { inbox: 203, get_recent_stranger_message: 2047 }
+  const imResponse = (body: Record<string, unknown>, status = 200, message = 'OK'): HttpResponse => {
+    const cmd = IM_CMD[Object.keys(body)[0] ?? ''] ?? 0
+    return fakeResponse(new Uint8Array(proto.encode('Response', 'Response', { cmd, message, body })), {
+      status,
+      headers: [['content-type', 'application/x-protobuf']],
+      url: 'https://imapi.douyin.com/',
+    })
+  }
+
+  /** 会话：members 里有自己和对方，last_sender 给昵称与 sec_uid。 */
+  const conversation = (id: string, over: Record<string, unknown> = {}) => ({
+    conversation_id: id,
+    conversation_short_id: '7400000000000000123',
+    conversation_type: 1,
+    inbox_type: 1,
+    members: { members: [{ uid: MY_UID }, { uid: PEER_UID, sec_uid: PEER_SEC }] },
+    unread_count: 3,
+    last_sender: { sender_uid: PEER_UID, sec_uid: PEER_SEC, nickname: '小美' },
+    ext_info: { last_active_time: '1789999900' },
+    user_setting: { last_msg_time: '1790000000' },
+    ...over,
+  })
+
+  const message = (conv: string, over: Record<string, unknown> = {}) => ({
+    conversation_id: conv,
+    conversation_type: 1,
+    server_message_id: '7400000000000000777',
+    sender: PEER_UID,
+    sec_sender: PEER_SEC,
+    message_type: 7,
+    content: JSON.stringify({ aweType: 700, type: 0, richTextInfos: [], text: '你好呀' }),
+    create_time: '1790000000',
+    ...over,
+  })
+
+  it('--folder main：cmd 203 带会话与最近消息，映射出 peer 的 sec_uid / 数字 uid、昵称、末条消息、未读与发送方', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: {} })
+    const inbox = {
+      conversations: [
+        conversation(CONV_MAIN),
+        conversation(CONV_SELF, {
+          unread_count: 0,
+          last_sender: { sender_uid: MY_UID },
+          members: { members: [{ uid: MY_UID }, { uid: '5550001' }] },
+          user_setting: { last_msg_time: '1789999000' },
+        }),
+      ],
+      messages: [message(CONV_MAIN), message(CONV_SELF, { sender: MY_UID, content: JSON.stringify({ text: '在吗' }), create_time: '1789999000' })],
+      has_more: 1,
+      next_cursor: '20',
+    }
+    await withServer([['imapi.douyin.com/v2/message/get_by_user_init', () => imResponse({ inbox })]], async (seen) => {
+      const r: any = await msgList(ctx)
+      expect(seen.map(reqPath)).toEqual(['POST https://imapi.douyin.com/v2/message/get_by_user_init'])
+      const req: any = pbBody((seen[0]!.body as { base64: string }).base64)
+      expect([req.cmd, req.auth_type, req.inbox_type]).toEqual([203, 1, '1'])
+      expect(req.body.inbox).toMatchObject({ conv_limit: 20, msg_limit: 20 })
+      expect(r.data).toEqual([
+        {
+          id: CONV_MAIN,
+          peer: { id: PEER_SEC, name: '小美', url: `https://www.douyin.com/user/${PEER_SEC}` },
+          unread: 3,
+          last_message: '你好呀',
+          updated_at: '2026-09-21T22:13:20+08:00',
+          folder: 'main',
+          last_sender: 'peer',
+          peer_uid: PEER_UID,
+        },
+        {
+          id: CONV_SELF,
+          peer: { id: '5550001', name: null, url: null },
+          unread: 0,
+          last_message: '在吗',
+          updated_at: '2026-09-21T21:56:40+08:00',
+          folder: 'main',
+          last_sender: 'me',
+          peer_uid: '5550001',
+        },
+      ])
+      expect(r.page).toEqual({ cursor: '20', has_more: true })
+    })
+  })
+
+  it('--folder main：/v2 拿不到回包体时换网页端的 /v1/message/get_message_by_init 再试一次', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: {} })
+    const routes: Route[] = [
+      ['imapi.douyin.com/v2/message/get_by_user_init', () => imResponse({})],
+      ['imapi.douyin.com/v1/message/get_message_by_init', () => imResponse({ inbox: { conversations: [conversation(CONV_MAIN)], messages: [message(CONV_MAIN)], has_more: 0 } })],
+    ]
+    await withServer(routes, async (seen) => {
+      const r: any = await msgList(ctx)
+      expect(seen.map(reqPath)).toEqual([
+        'POST https://imapi.douyin.com/v2/message/get_by_user_init',
+        'POST https://imapi.douyin.com/v1/message/get_message_by_init',
+      ])
+      expect(r.data).toHaveLength(1)
+      expect(r.page).toEqual({ cursor: null, has_more: false })
+    })
+  })
+
+  it('--folder request：cmd 2047 拉消息请求箱，标记 folder=request、按发送方推 peer 与 last_sender', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: { folder: 'request' } })
+    const page = {
+      messages: [
+        {
+          conversation_id: CONV_MAIN,
+          conversation_short_id: '7400000000000000123',
+          badge_count: 2,
+          messages: [
+            message(CONV_MAIN, { create_time: '1790000100' }),
+            message(CONV_MAIN, { sender: MY_UID, sec_sender: '', server_message_id: '7400000000000000778', content: JSON.stringify({ text: '你是谁' }), create_time: '1790000200' }),
+          ],
+        },
+      ],
+      has_more: false,
+    }
+    await withServer([['imapi.douyin.com/v1/message/get_recent_stranger_message', () => imResponse({ get_recent_stranger_message: page })]], async (seen) => {
+      const r: any = await msgList(ctx)
+      const req: any = pbBody((seen[0]!.body as { base64: string }).base64)
+      expect([req.cmd, req.auth_type]).toEqual([2047, 1])
+      expect(req.body.get_recent_stranger_message.source).toBe('code_up')
+      expect(r.data).toEqual([
+        {
+          id: CONV_MAIN,
+          // 消息请求箱没有成员表，sec_uid 取自消息的 sec_sender（自己那条没有）
+          peer: { id: PEER_SEC, name: null, url: `https://www.douyin.com/user/${PEER_SEC}` },
+          unread: 2,
+          last_message: '你是谁',
+          updated_at: '2026-09-21T22:16:40+08:00',
+          folder: 'request',
+          last_sender: 'me',
+          peer_uid: PEER_UID,
+        },
+      ])
+      expect(r.page).toEqual({ cursor: null, has_more: false })
+    })
+  })
+
+  it('--folder all：消息请求箱取不到时只列已建立的会话（并写警告），不把整条命令废掉', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: { folder: 'all' } })
+    const warns: string[] = []
+    ;(ctx as any).log = { ...ctx.log, warn: (m: string) => warns.push(m) }
+    const routes: Route[] = [
+      ['imapi.douyin.com/v2/message/get_by_user_init', () => imResponse({ inbox: { conversations: [conversation(CONV_MAIN)], messages: [message(CONV_MAIN)], has_more: 0 } })],
+      ['imapi.douyin.com/v1/message/get_recent_stranger_message', () => imResponse({})],
+    ]
+    await withServer(routes, async () => {
+      const r: any = await msgList(ctx)
+      expect(r.data.map((c: any) => c.folder)).toEqual(['main'])
+      expect(warns.join('\n')).toMatch(/消息请求箱取不到/)
+    })
+  })
+
+  it('上游只回信封、没有 body 时明确报 UPSTREAM，不静默返回空数组', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: {} })
+    await withServer([['/message/', () => imResponse({})]], async () => {
+      await expect(msgList(ctx)).rejects.toMatchObject({ code: 'UPSTREAM', message: expect.stringMatching(/没有回包体/) })
+    })
+    // 服务端给了错误描述：原样带出来
+    await withServer([['/message/', () => imResponse({}, 200, 'status_code=409 风控限流')]], async () => {
+      await expect(msgList(ctx)).rejects.toMatchObject({ code: 'UPSTREAM', message: expect.stringMatching(/风控限流/) })
+    })
+  })
+
+  it('回包能解但没有会话时给空数组（空收件箱不是错误）', async () => {
+    const { msgList } = await commands()
+    const ctx = loggedFrom('im_send_file', { options: {} })
+    await withServer([['imapi.douyin.com/v2/message/get_by_user_init', () => imResponse({ inbox: { has_more: 0 } })]], async () => {
+      const r: any = await msgList(ctx)
+      expect(r.data).toEqual([])
+      expect(r.page).toEqual({ cursor: null, has_more: false })
+    })
   })
 })

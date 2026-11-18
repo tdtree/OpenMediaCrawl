@@ -119,6 +119,15 @@ export async function decodeImResponse(res: HttpResponse, what: string): Promise
   const logid = res.headers.get('x-tt-logid') || res.headers.get('x-tt-log-id') || ''
   const text = Buffer.from(buf).toString('utf8')
   const printable = /^[\x09\x0a\x0d\x20-\x7e\u4e00-\u9fa5]*$/.test(text)
+  // 风控踢回时抖音会用 content-type: application/x-protobuf 返回
+  // 20 字节的 {"decision": "KICK"} 纯文本；若先按 protobuf 解码就会变成
+  // 「响应解析失败」，把可操作的结论藏在错误里。所以先无条件嗅一次。
+  if (/decision"?\s*:\s*"?KICK/i.test(text)) {
+    throw new CatbusError('RISK_CONTROL', '抖音风控拒绝了这次私信（decision=KICK）：当前会话被判定为风险/自动化', {
+      hint: '先在手机 App 里手动给同一个人发一条，或重新扫码登录后再试；频繁失败时降低频率、换号、避免同一账号在多处同时发送',
+      detail: { status: res.status, contentType: ct, logid, size: buf.length },
+    })
+  }
   if (!res.ok || /json|text/i.test(ct)) {
     const snippet = printable ? text.trim().slice(0, 300) : ''
     let decision = ''
@@ -632,6 +641,195 @@ export function shareWebContent(url: string): Obj {
 /** 用户名片，type 25（上游 build_user_card_content，content 为空、字段显式给出）。 */
 export function userCardContent(u: { uid: string; secUid: string; name: string; avatar: unknown }): Obj {
   return { uid: u.uid, secUID: u.secUid, name: u.name, avatar: urlObject(u.avatar), cover_items: [], cover_url: [] }
+}
+
+// ================================================================ 会话列表（msg list）
+
+/**
+ * 会话列表来自 imapi 的两个 cmd：
+ * - cmd 203 `/v2/message/get_by_user_init`：私信页初始化，回包同时带会话和每个会话的最近消息，
+ *   是「已建立的会话」最完整的一份（能拿到最后一条消息的正文与时间）。
+ *   网页端走的是同一语义的 `/v1/message/get_message_by_init`，两个路径都试。
+ * - cmd 2047 `/v1/message/get_recent_stranger_message`：陌生人的最近消息，也就是「消息请求」箱
+ *   （对方未关注你 / 你们还没互发过消息时，私信不会进主会话列表）。回包按会话分组，带 badge_count。
+ *
+ * 另一条已知但本地无法确认回包结构的路线：cmd 1001 `/v1/stranger/get_conversation_list`
+ * （网页端「消息请求」tab 会打这个），实测常被网关限流（409 空 body），所以没有实现。
+ */
+
+/** 会话所在的两类收件箱。 */
+export type InboxFolder = 'main' | 'request'
+
+export interface ConversationMemberRow {
+  uid: string
+  sec_uid: string
+}
+
+export interface ConversationMessageRow {
+  id: string
+  conversation_id: string
+  sender: string
+  sec_sender: string
+  message_type: number
+  content: string
+  create_time: string
+}
+
+export interface ConversationRow {
+  conversation_id: string
+  short_id: string
+  type: number
+  ticket: string
+  unread: number
+  inbox_type: number
+  members: ConversationMemberRow[]
+  last_sender: ConversationMemberRow & { nickname: string }
+  /** 会话名（群聊的名字）与资料时间，单聊里通常为空。 */
+  name: string
+  last_active_time: string
+  last_msg_time: string
+  messages: ConversationMessageRow[]
+}
+
+export interface ConversationPage {
+  rows: ConversationRow[]
+  cursor: string | null
+  hasMore: boolean
+}
+
+const IM_CURSOR = (v: unknown): string | undefined => {
+  const s = v == null ? '' : String(v)
+  return s && s !== '0' ? s : undefined
+}
+
+const messageRow = (m: any): ConversationMessageRow => ({
+  id: String(m?.server_message_id ?? ''),
+  conversation_id: String(m?.conversation_id ?? ''),
+  sender: String(m?.sender ?? ''),
+  sec_sender: String(m?.sec_sender ?? ''),
+  message_type: Number(m?.message_type ?? 0),
+  content: String(m?.content ?? ''),
+  create_time: String(m?.create_time ?? ''),
+})
+
+/** 会话里参与者的 uid / sec_uid（去掉 0 与重复）。 */
+function memberRows(c: any): ConversationMemberRow[] {
+  const out = new Map<string, ConversationMemberRow>()
+  for (const m of c?.members?.members ?? []) {
+    const uid = String(m?.uid ?? '')
+    if (!uid || uid === '0') continue
+    out.set(uid, { uid, sec_uid: String(m?.sec_uid ?? '') })
+  }
+  return [...out.values()]
+}
+
+/** cmd 203 的 Conversation → 行。 */
+function conversationRow(c: any, messages: ConversationMessageRow[]): ConversationRow {
+  return {
+    conversation_id: String(c?.conversation_id ?? ''),
+    short_id: String(c?.conversation_short_id ?? ''),
+    type: Number(c?.conversation_type ?? 0),
+    ticket: String(c?.ticket ?? ''),
+    unread: Number(c?.unread_count ?? 0) || 0,
+    inbox_type: Number(c?.inbox_type ?? 0) || 0,
+    members: memberRows(c),
+    last_sender: {
+      uid: String(c?.last_sender?.sender_uid ?? ''),
+      sec_uid: String(c?.last_sender?.sec_uid ?? ''),
+      nickname: String(c?.last_sender?.nickname ?? ''),
+    },
+    name: String(c?.ext_info?.name ?? ''),
+    last_active_time: String(c?.ext_info?.last_active_time ?? ''),
+    last_msg_time: String(c?.user_setting?.last_msg_time ?? ''),
+    messages,
+  }
+}
+
+/** cmd 2047 的 ConversationRecentMessage → 行：没有成员表，参与者从消息的 sender 推。 */
+function strangerRow(r: any): ConversationRow {
+  const messages = [...(r?.messages ?? []), ...(r?.ext_messages ?? [])]
+    .map(messageRow)
+    .sort((a, b) => Number(BigInt(a.create_time || '0') - BigInt(b.create_time || '0')))
+  const members = new Map<string, ConversationMemberRow>()
+  for (const m of messages) if (m.sender && m.sender !== '0') members.set(m.sender, { uid: m.sender, sec_uid: m.sec_sender })
+  const last = messages.at(-1)
+  return {
+    conversation_id: String(r?.conversation_id ?? '') || (last?.conversation_id ?? ''),
+    short_id: String(r?.conversation_short_id ?? '') || (last?.id ?? ''),
+    type: 1,
+    ticket: '',
+    unread: Number(r?.badge_count ?? 0) || 0,
+    inbox_type: 0,
+    members: [...members.values()],
+    last_sender: last ? { uid: last.sender, sec_uid: last.sec_sender, nickname: '' } : { uid: '', sec_uid: '', nickname: '' },
+    name: '',
+    last_active_time: '',
+    last_msg_time: last?.create_time ?? '',
+    messages,
+  }
+}
+
+/**
+ * 一个 IM 只读请求：信封同 createConversation（cmd / body 的 oneof tag 都等于 cmd），
+ * 回包按 {@link decodeImResponse} 解码，body 里的 oneof 字段名由 `bodyField` 指定。
+ */
+async function imRequest(d: Douyin, what: string, cmd: number, path: string, body: Record<string, unknown>, bodyField: string, inboxType: number): Promise<any> {
+  const req = normalRequest(cmd)
+  req.auth_type = 1
+  req.inbox_type = inboxType
+  req.body = body
+  const res = await d.request({ method: 'POST', url: `${IMAPI}${path}`, headers: protoHeaders().list(), body: proto.encode('Request', 'Request', req) })
+  const parsed = await decodeImResponse(res, what)
+  const status = String(parsed.error_desc || parsed.message || '')
+  if (status && status !== 'OK') {
+    throw new CatbusError('UPSTREAM', `${what}失败：${status}`, { detail: { cmd, path, status, inboxType } })
+  }
+  const payload = parsed.body?.[bodyField]
+  if (payload == null) {
+    // 空 body 也走这里：风控 / 参数不对时服务端常常只回一个信封，静默当成「没有会话」会掩盖问题。
+    throw new CatbusError('UPSTREAM', `${what}没有回包体（cmd ${cmd} ${path}）`, {
+      hint: '多半是这个账号没有私信权限或请求被服务端拦下；用 -v 看请求，或先在浏览器里打开一次私信页再试',
+      detail: { cmd, path, inboxType, bodyFields: Object.keys(parsed.body ?? {}), status: status || null },
+    })
+  }
+  return payload
+}
+
+const INBOX_PATHS = ['/v2/message/get_by_user_init', '/v1/message/get_message_by_init'] as const
+
+/** 已建立的会话（cmd 203）：会话 + 每个会话的最近消息。 */
+export async function conversationPage(d: Douyin, options: { limit?: number; cursor?: string } = {}): Promise<ConversationPage> {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 20) || 20, 1), 50)
+  const body = { inbox: { conv_limit: limit, msg_limit: limit, cursor: IM_CURSOR(options.cursor) } }
+  let first: CatbusError | null = null
+  for (const path of INBOX_PATHS) {
+    try {
+      const inbox = await imRequest(d, '拉取会话列表', 203, path, body, 'inbox', 1)
+      const messages = (inbox.messages ?? []).map(messageRow)
+      const rows = (inbox.conversations ?? []).map((c: any) =>
+        conversationRow(c, messages.filter((m: ConversationMessageRow) => m.conversation_id === String(c?.conversation_id ?? ''))),
+      )
+      const hasMore = Boolean(Number(inbox.has_more ?? 0))
+      return { rows, cursor: hasMore ? IM_CURSOR(inbox.next_cursor) ?? null : null, hasMore }
+    } catch (error) {
+      if (!(error instanceof CatbusError) || error.code !== 'UPSTREAM') throw error
+      first ??= error
+    }
+  }
+  throw new CatbusError('UPSTREAM', `${first!.message}（/v2 与 /v1 两条路径都试过）`, {
+    hint: '确认这个账号能在网页端打开私信页；打不开说明当前登录态没有私信权限',
+    detail: { tried: INBOX_PATHS, first: first!.detail },
+    cause: first!,
+  })
+}
+
+/** 消息请求箱（cmd 2047）：陌生人发来的、还没被接受的会话。 */
+export async function strangerPage(d: Douyin, options: { cursor?: string } = {}): Promise<ConversationPage> {
+  const body = { get_recent_stranger_message: { latest_stranger_version: IM_CURSOR(options.cursor), source: 'code_up', biz_info: '' } }
+  const page = await imRequest(d, '拉取消息请求（陌生人会话）', 2047, '/v1/message/get_recent_stranger_message', body, 'get_recent_stranger_message', 1)
+  const rows = (page.messages ?? []).map(strangerRow).filter((r: ConversationRow) => r.conversation_id)
+  const hasMore = Boolean(page.has_more)
+  return { rows, cursor: hasMore ? IM_CURSOR(page.next_stranger_version) ?? null : null, hasMore }
 }
 
 // ================================================================ 私信长连（douyin_recv_msg.py）

@@ -237,4 +237,16 @@ describe('accountStatus', () => {
     expect(result.message).toContain('超时')
     expect(Date.now() - started).toBeLessThan(3_000)
   })
+
+  it('失败记录会带上错误码和原因，成功记录不写这两个字段', async () => {
+    const store = ledger()
+    await store.record({ platform: 'douyin', target: 'u1', kind: 'dm', ok: false, code: 'AUTH_EXPIRED', message: '凭证已过期' })
+    await store.record({ platform: 'douyin', target: 'u2', kind: 'dm', ok: true })
+    const raw = await readFile(ledgerFile, 'utf8')
+    const rows = raw.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(rows[0]).toMatchObject({ target: 'u1', ok: false, code: 'AUTH_EXPIRED', message: '凭证已过期' })
+    // 成功的那条不带多余字段，账本不会因为多两个 null 膨胀
+    expect(rows[1]).not.toHaveProperty('code')
+    expect(rows[1]).not.toHaveProperty('message')
+  })
 })

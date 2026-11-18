@@ -1,6 +1,7 @@
 import * as n from '../../../core/normalize.js'
 import { jsonLoads } from '../../../core/py.js'
-import type { Comment, Event, Item, ItemStatus, Live, Media, Notice, Rank, User, UserRef } from '../../../core/schemas.js'
+import type { Comment, Conversation, Event, Item, ItemStatus, Live, Media, Notice, Rank, User, UserRef } from '../../../core/schemas.js'
+import type * as im from './im.js'
 import { LIVE, WWW } from './profile.js'
 
 /** 抖音原始对象 → 归一化类型（AGENTS 6.2）。用户 id 用 sec_uid：它能直接拼出主页 URL，也是各接口的入参。 */
@@ -355,4 +356,43 @@ export function liveEvent(method: string, msg: any): Event | null {
     default:
       return null
   }
+}
+
+// ================================================================ 私信会话列表
+
+/** 私信消息的正文：文本取 content.text，分享作品取作品 id，其余类型没有可读文本。 */
+export function imText(m: { message_type: number; content: string }): string | null {
+  let content: any = {}
+  try {
+    content = jsonLoads(m.content || '{}')
+  } catch {}
+  if (m.message_type === 7) return n.str(content?.text)
+  if (m.message_type === 8) return n.str(content?.itemId)
+  return null
+}
+
+/**
+ * 会话列表的一行 → Conversation（cmd 203 的会话、cmd 2047 的消息请求都走这里）。
+ * peer 的 id 用 sec_uid（能拼主页，也是各接口的入参），数字 uid 单独放 peer_uid。
+ * 昵称只有回包给了才填：私信会话列表只带「最后发送者」的昵称，单聊里往往拿不到对方的。
+ */
+export function conversation(row: im.ConversationRow, myUid: string, folder: im.InboxFolder): Conversation {
+  const peers = row.members.filter((m) => m.uid && m.uid !== myUid)
+  const peer = peers[0] ?? null
+  const last = row.messages.at(-1) ?? null
+  const sender = row.last_sender.uid ? row.last_sender : last ? { uid: last.sender, sec_uid: last.sec_sender, nickname: '' } : null
+  const name = row.name || (peer && sender && sender.uid === peer.uid ? sender.nickname : '')
+  return n.conversation(
+    {
+      id: row.conversation_id,
+      peer: peer ? (peer.sec_uid ? ref(peer.sec_uid, name) : n.userRef({ id: peer.uid, name })) : null,
+      unread: n.count(row.unread),
+      last_message: last ? imText(last) : null,
+      updated_at: n.time(row.last_msg_time || row.last_active_time || last?.create_time),
+      folder,
+      last_sender: sender && myUid ? (sender.uid === myUid ? 'me' : 'peer') : null,
+      peer_uid: peer?.uid ?? null,
+    },
+    row,
+  )
 }

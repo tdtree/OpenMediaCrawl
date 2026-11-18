@@ -217,9 +217,16 @@ describe('toCsv', () => {
     const csv = toCsv([makeLead()])
     expect(csv.startsWith('\ufeff')).toBe(true)
     const lines = csv.slice(1).split('\r\n')
-    expect(lines[0]).toBe('平台,评论者,评论内容,联系方式,地域,命中词,评论时间,作品标题,作品链接,评论者ID,采集时间')
-    expect(lines[1]).toBe('xhs,小明,多少钱？,,广东,,2026-11-01T10:00:00+08:00,测试作品,https://example.com/i1,u1,2026-11-02T10:00:00+08:00')
+    expect(lines[0]).toBe('平台,评论者,评论内容,联系方式,地域,命中词,评论时间,作品标题,作品链接,评论者ID,采集时间,私聊状态,私聊时间')
+    expect(lines[1]).toBe('xhs,小明,多少钱？,,广东,,2026-11-01T10:00:00+08:00,测试作品,https://example.com/i1,u1,2026-11-02T10:00:00+08:00,未私聊,')
     expect(csv.endsWith('\r\n')).toBe(true)
+  })
+
+  it('私聊状态 / 私聊时间两列来自读取时的关联字段', () => {
+    const row = toCsv([makeLead({ dm_sent_at: '2026-11-03T09:30:00+08:00' })]).slice(1).split('\r\n')[1]!
+    expect(row.endsWith(',已私聊,2026-11-03T09:30:00+08:00')).toBe(true)
+    // 没关联到就是「未私聊」+ 空时间，不编造
+    expect(toCsv([makeLead()]).slice(1).split('\r\n')[1]!.endsWith(',未私聊,')).toBe(true)
   })
 
   it('逗号、引号、换行按 RFC 4180 转义', () => {
@@ -247,7 +254,7 @@ describe('toCsv', () => {
 
   it('空数组只有表头', () => {
     expect(toCsv([])).toBe(
-      '\ufeff平台,评论者,评论内容,联系方式,地域,命中词,评论时间,作品标题,作品链接,评论者ID,采集时间\r\n',
+      '\ufeff平台,评论者,评论内容,联系方式,地域,命中词,评论时间,作品标题,作品链接,评论者ID,采集时间,私聊状态,私聊时间\r\n',
     )
   })
 })

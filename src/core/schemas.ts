@@ -133,6 +133,12 @@ export interface Conversation {
   unread: number | null
   last_message: string | null
   updated_at: string | null
+  /** 会话在哪个收件箱：`main` 已建立的会话，`request` 陌生人 / 消息请求。只有能区分的平台才输出。 */
+  folder?: 'main' | 'request'
+  /** 最后一条消息是谁发的。只有会话列表带发送者的平台才输出。 */
+  last_sender?: 'me' | 'peer' | null
+  /** peer 在平台内部的数字 UID（抖音的会话成员 uid）。只有同时给得出 sec_uid 与数字 uid 的平台才输出。 */
+  peer_uid?: string | null
 }
 
 export interface Message {

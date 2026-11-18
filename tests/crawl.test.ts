@@ -1,18 +1,23 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Comment, Item, User } from '../src/core/schemas.js'
 import { CatbusError } from '../src/core/errors.js'
 import { mergeCrawlConfig } from '../src/crawl/config.js'
 import { runCrawl } from '../src/crawl/job.js'
+import { loadIndex, resetRecordCache, threadOf } from '../src/crawl/records.js'
+import { openContentStore } from '../src/crawl/shared/store.js'
 import { createStorage, readStoredRecords } from '../src/crawl/storage.js'
 import { shouldNag } from '../src/crawl/cli.js'
 import { createSubprocessClient } from '../src/crawl/client.js'
 import { startUiServer } from '../src/crawl/ui.js'
 import { generateWordCloud, tokenize } from '../src/crawl/wordcloud.js'
-import type { CrawlOptions, CrawlPlatformClient } from '../src/crawl/types.js'
+import { LeadStore, buildLeads, type Lead } from '../src/crawl/leads.js'
+import { SendLedger } from '../src/crawl/guard.js'
+import { addCandidate, addCandidates, listCandidates } from '../src/crawl/candidates.js'
+import type { CrawlOptions, CrawlPlatform, CrawlPlatformClient } from '../src/crawl/types.js'
 
 const item = (id: string): Item => ({ id, kind: 'text', url: `https://example.test/${id}`, title: id, text: id, author: null, created_at: null, cover: null, media: [], stats: { views: null, likes: null, comments: null, collects: null, shares: null }, price: null, status: 'published' })
 const comment = (id: string, replies: number | null = null, parent_id: string | null = null): Comment => ({ id, item_id: 'i1', parent_id, author: null, text: `评论 ${id} 露营装备很好用`, created_at: null, stats: { likes: null, replies } })
@@ -239,12 +244,135 @@ describe('config, nag line, wordcloud', () => {
   })
 })
 
+describe('comments always land somewhere readable', () => {
+  const itemOf = (id: string): Item => item(id)
+  const cmt = (id: string, itemId: string, replies: number | null = null, parentId: string | null = null): Comment =>
+    ({ id, item_id: itemId, parent_id: parentId, author: null, text: `评论 ${id}`, created_at: null, stats: { likes: null, replies } })
+  /** 2 个作品、9 条评论，其中 2 条是二级（a1 下面两条）。 */
+  const nineComments = (ref: string) => ref.endsWith('i1')
+    ? [cmt('a1', 'i1', 2), cmt('a2', 'i1', 0), cmt('a3', 'i1', 0), cmt('a4', 'i1', 0)]
+    : [cmt('b1', 'i2', 0), cmt('b2', 'i2', 0), cmt('b3', 'i2', 0)]
+  const twoItems = (): CrawlPlatformClient => ({
+    async search() { return { items: [itemOf('i1'), itemOf('i2')], hasMore: false, cursor: null } },
+    async detail(id) { return itemOf(id.replace('https://example.test/', '')) },
+    async comments(ref) { return nineComments(ref) },
+    async subComments(_ref, cid) { return [cmt(`${cid}-r1`, 'i1', null, cid), cmt(`${cid}-r2`, 'i1', null, cid)] },
+    async creator(id) { return user(id) },
+    async creatorItems() { return [] },
+    async download() { return 0 },
+  })
+
+  it('legacy mode writes the comment file and loadIndex reads all 9 back', async () => {
+    const out = await tempDir('omc-cm-file-')
+    const result = await runCrawl(options(out, { maxItems: 5, maxComments: 50 }), { client: twoItems() })
+    expect(result.counts).toMatchObject({ items: 2, comments: 9 })
+    expect(result.commentsUnsupported).toBeUndefined()
+    const files = await readdir(join(out, 'xhs'))
+    expect(files.sort()).toEqual([`search_comment_${new Date().toISOString().slice(0, 10)}.jsonl`, `search_item_${new Date().toISOString().slice(0, 10)}.jsonl`])
+
+    resetRecordCache()
+    const index = await loadIndex(out, 'xhs')
+    expect(index.items.map((one) => one.id).sort()).toEqual(['i1', 'i2'])
+    expect(index.items.find((one) => one.id === 'i1')!.comments).toBe(6)
+    expect(index.comments.get('i1')!.length).toBe(6)
+    expect(index.comments.get('i2')!.length).toBe(3)
+    const thread = threadOf(index.comments.get('i1')!)
+    expect(thread.map((one) => one.id)).toEqual(['a1', 'a2', 'a3', 'a4'])
+    expect(thread[0]!.children.map((one) => one.id)).toEqual(['a1-r1', 'a1-r2'])
+    expect(thread.flatMap((one) => [one.id, ...one.children.map((kid) => kid.id)])).toHaveLength(6)
+  })
+
+  it('shared mode keeps the same 9 comments readable without a per-user comment file', async () => {
+    const base = await tempDir('omc-cm-shared-')
+    const out = join(base, 'users', 'admin')
+    const store = openContentStore(join(base, 'shared'))
+    try {
+      const result = await runCrawl(options(out, { maxItems: 5, maxComments: 50 }), { client: twoItems(), content: store, user: 'admin', jobId: 'job-1' })
+      expect(result.counts).toMatchObject({ items: 2, comments: 9, newComments: 9 })
+      // 共享模式下用户目录只有作品记录（评论在 content.sqlite 里），这就是「有时没有 comment 文件」的由来。
+      expect((await readdir(join(out, 'xhs'))).filter((name) => name.includes('comment'))).toEqual([])
+      expect(store.commentCount('xhs', 'i1')).toBe(6)
+      expect(store.commentCount('xhs', 'i2')).toBe(3)
+
+      resetRecordCache()
+      const index = await loadIndex({ root: out, store, user: 'admin' }, 'xhs')
+      expect(index.items).toHaveLength(2)
+      expect(index.comments.get('i1')!.length).toBe(6)
+      expect(index.comments.get('i2')!.length).toBe(3)
+      const thread = threadOf(index.comments.get('i1')!)
+      expect(thread.map((one) => one.id)).toEqual(['a1', 'a2', 'a3', 'a4'])
+      expect(thread[0]!.children.map((one) => one.id)).toEqual(['a1-r1', 'a1-r2'])
+    } finally { store.close() }
+  })
+
+  it('shared comments are still visible when the ref is missing (old import / CLI with another user)', async () => {
+    const base = await tempDir('omc-cm-noref-')
+    const out = join(base, 'users', 'admin')
+    const store = openContentStore(join(base, 'shared'))
+    try {
+      // 库里只有内容：没有 addRef（旧数据迁移、CLI 忘了设 OMC_USER 都会这样）。
+      store.putItem('xhs', itemOf('i1'), { body: 'full' })
+      store.putComments('xhs', 'i1', [cmt('a1', 'i1', 1), cmt('a2', 'i1', 0), cmt('a1-r1', 'i1', null, 'a1')], { limit: 20, complete: false })
+      await mkdir(join(out, 'xhs'), { recursive: true })
+      await writeFile(join(out, 'xhs', 'search_item_2026-11-17.jsonl'), `${JSON.stringify({ id: 'i1', kind: 'text', url: 'https://example.test/i1', title: 'i1', shared: true })}\n`, 'utf8')
+
+      resetRecordCache()
+      const index = await loadIndex({ root: out, store, user: 'admin' }, 'xhs')
+      expect(index.items.map((one) => one.id)).toEqual(['i1'])
+      expect(index.comments.get('i1')?.map((one) => one.id)).toEqual(['a1', 'a2', 'a1-r1'])
+      expect(threadOf(index.comments.get('i1')!)[0]!.children.map((one) => one.id)).toEqual(['a1-r1'])
+    } finally { store.close() }
+  })
+
+  it('threadOf keeps comments whose parent is a platform sentinel or is not in the batch', () => {
+    const list: Comment[] = [
+      { ...cmt('c0', 'i1'), parent_id: '0' },          // 抖音式「没有父评论」
+      { ...cmt('c1', 'i1'), parent_id: 'i1' },         // 父指针指向作品本身
+      { ...cmt('c2', 'i1'), parent_id: 'c2' },         // 指向自己
+      { ...cmt('c3', 'i1'), parent_id: 'gone' },       // 父评论没采到
+      { ...cmt('c4', 'i1'), parent_id: 'c0' },         // 真的二级
+    ]
+    const thread = threadOf(list)
+    expect(thread.map((one) => one.id)).toEqual(['c0', 'c1', 'c2', 'c3'])
+    expect(thread[0]!.children.map((one) => one.id)).toEqual(['c4'])
+  })
+
+  it('marks commentsUnsupported instead of failing the job when the platform has no comment list', async () => {
+    const out = await tempDir('omc-cm-unsupported-')
+    const events: string[] = []
+    let attempts = 0
+    const client = twoItems()
+    client.comments = async () => { attempts++; throw new CatbusError('UNSUPPORTED', 'taobao 不支持 comment list') }
+    const result = await runCrawl(options(out, { platform: 'taobao' as CrawlPlatform, maxItems: 5 }), {
+      client,
+      onEvent: (event) => events.push(event.message),
+    })
+    expect(result.commentsUnsupported).toBe(true)
+    expect(result.counts).toMatchObject({ items: 2, comments: 0 })
+    expect(attempts).toBe(1) // 确认不支持就不再逐条作品重试
+    expect(events.some((message) => message.includes('暂不支持评论采集'))).toBe(true)
+    expect(await readdir(join(out, 'taobao'))).toHaveLength(1) // 作品照常落盘
+  })
+})
+
 describe('web UI', () => {
-  const savedEnv = { users: process.env.OMC_USERS_FILE, password: process.env.OMC_ADMIN_PASSWORD, bin: process.env.MEDIACRAWL_BIN }
+  const savedEnv = {
+    users: process.env.OMC_USERS_FILE,
+    password: process.env.OMC_ADMIN_PASSWORD,
+    bin: process.env.MEDIACRAWL_BIN,
+    maxJobsPerUser: process.env.OMC_MAX_JOBS_PER_USER,
+    maxJobsGlobal: process.env.OMC_MAX_JOBS_GLOBAL,
+    jobTtl: process.env.OMC_JOB_TTL_MS,
+    campaignTtl: process.env.OMC_CAMPAIGN_TTL_MS,
+  }
   afterEach(() => {
     if (savedEnv.users === undefined) delete process.env.OMC_USERS_FILE; else process.env.OMC_USERS_FILE = savedEnv.users
     if (savedEnv.password === undefined) delete process.env.OMC_ADMIN_PASSWORD; else process.env.OMC_ADMIN_PASSWORD = savedEnv.password
     if (savedEnv.bin === undefined) delete process.env.MEDIACRAWL_BIN; else process.env.MEDIACRAWL_BIN = savedEnv.bin
+    if (savedEnv.maxJobsPerUser === undefined) delete process.env.OMC_MAX_JOBS_PER_USER; else process.env.OMC_MAX_JOBS_PER_USER = savedEnv.maxJobsPerUser
+    if (savedEnv.maxJobsGlobal === undefined) delete process.env.OMC_MAX_JOBS_GLOBAL; else process.env.OMC_MAX_JOBS_GLOBAL = savedEnv.maxJobsGlobal
+    if (savedEnv.jobTtl === undefined) delete process.env.OMC_JOB_TTL_MS; else process.env.OMC_JOB_TTL_MS = savedEnv.jobTtl
+    if (savedEnv.campaignTtl === undefined) delete process.env.OMC_CAMPAIGN_TTL_MS; else process.env.OMC_CAMPAIGN_TTL_MS = savedEnv.campaignTtl
   })
 
   async function uiServer(prefix: string, clientFactory?: (platform: any, extra: any) => any) {
@@ -260,6 +388,26 @@ describe('web UI', () => {
     const response = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
     expect(response.status).toBe(200)
     return response.headers.get('set-cookie')!.split(';')[0]!
+  }
+
+  async function addUser(base: string, adminCookie: string, username: string, password = 'password123'): Promise<void> {
+    const response = await fetch(`${base}/api/users`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: adminCookie },
+      body: JSON.stringify({ username, password }),
+    })
+    expect(response.status).toBe(201)
+  }
+
+  /** 等所有采集任务离开 running（测试收尾用，避免 server.close 后还有异步写入）。 */
+  async function waitForIdleJobs(base: string, cookie: string, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const list = await (await fetch(`${base}/api/jobs`, { headers: { cookie } })).json() as Array<{ status: string }>
+      if (list.every((job) => job.status !== 'running')) return
+      await new Promise((done) => setTimeout(done, 25))
+    }
+    throw new Error('jobs did not finish in time')
   }
 
   it('requires a login, runs a job for that user, streams SSE and rejects bad input / path traversal', async () => {
@@ -290,6 +438,147 @@ describe('web UI', () => {
       expect((await fetch(`${base}/api/files?path=${encodeURIComponent(join(out, '..', 'secret.txt'))}`, { headers: auth })).status).toBe(403)
       expect((await fetch(`${base}/api/logout`, { method: 'POST', headers: auth })).status).toBe(200)
       expect((await fetch(`${base}/api/jobs`, { headers: auth })).status).toBe(401)
+    } finally { await ui.close() }
+  })
+
+  it('每用户同时只允许 1 个采集任务，超出返回 429', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const factory = (() => baseClient([], {
+      async search() { await gate; return { items: [], hasMore: false, cursor: null } },
+    })) as any
+    const { ui, base } = await uiServer('omc-limit-user-', factory)
+    try {
+      const admin = await signIn(base)
+      const adminAuth = { 'content-type': 'application/json', cookie: admin }
+      await addUser(base, admin, 'bob')
+      const bob = await signIn(base, 'bob', 'password123')
+      const bobAuth = { 'content-type': 'application/json', cookie: bob }
+      const body = JSON.stringify({ platform: 'xhs', type: 'search', keywords: 'k', maxItems: 1, sleep: '0' })
+
+      expect((await fetch(`${base}/api/jobs`, { method: 'POST', headers: adminAuth, body })).status).toBe(202)
+      const blocked = await fetch(`${base}/api/jobs`, { method: 'POST', headers: adminAuth, body })
+      expect(blocked.status).toBe(429)
+      expect((await blocked.json() as { error: string }).error).toContain('每用户最多 1')
+
+      // 另一个用户不受 admin 的并发占用影响。
+      expect((await fetch(`${base}/api/jobs`, { method: 'POST', headers: bobAuth, body })).status).toBe(202)
+    } finally {
+      release()
+      await waitForIdleJobs(base, await signIn(base))
+      await ui.close()
+    }
+  })
+
+  it('全局并发上限默认 4，可用 OMC_MAX_JOBS_GLOBAL 覆盖', async () => {
+    process.env.OMC_MAX_JOBS_PER_USER = '4'
+    process.env.OMC_MAX_JOBS_GLOBAL = '1'
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const factory = (() => baseClient([], {
+      async search() { await gate; return { items: [], hasMore: false, cursor: null } },
+    })) as any
+    const { ui, base } = await uiServer('omc-limit-global-', factory)
+    try {
+      const admin = await signIn(base)
+      const adminAuth = { 'content-type': 'application/json', cookie: admin }
+      await addUser(base, admin, 'bob')
+      const bob = await signIn(base, 'bob', 'password123')
+      const bobAuth = { 'content-type': 'application/json', cookie: bob }
+      const body = JSON.stringify({ platform: 'xhs', type: 'search', keywords: 'k', maxItems: 1, sleep: '0' })
+
+      expect((await fetch(`${base}/api/jobs`, { method: 'POST', headers: adminAuth, body })).status).toBe(202)
+      const blocked = await fetch(`${base}/api/jobs`, { method: 'POST', headers: bobAuth, body })
+      expect(blocked.status).toBe(429)
+      expect((await blocked.json() as { error: string }).error).toContain('服务器同时最多 1')
+    } finally {
+      release()
+      await waitForIdleJobs(base, await signIn(base))
+      await ui.close()
+    }
+  })
+
+  it('完成的采集任务过 TTL 后从内存移除', async () => {
+    process.env.OMC_JOB_TTL_MS = '50'
+    const { ui, base } = await uiServer('omc-job-ttl-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      const started = await fetch(`${base}/api/jobs`, {
+        method: 'POST', headers: auth,
+        body: JSON.stringify({ platform: 'xhs', type: 'search', keywords: 'k', maxItems: 1, sleep: '0' }),
+      })
+      expect(started.status).toBe(202)
+      const { id } = await started.json() as { id: string }
+      await waitForIdleJobs(base, cookie)
+      await new Promise((done) => setTimeout(done, 250))
+      const list = await (await fetch(`${base}/api/jobs`, { headers: { cookie } })).json() as Array<{ id: string }>
+      expect(list.some((job) => job.id === id)).toBe(false)
+    } finally { await ui.close() }
+  })
+
+  it('群发只允许 owner 查看 / 停止 / 订阅，admin 也不能跨用户', async () => {
+    const binDir = await tempDir('omc-bin-camp-owner-')
+    const bin = join(binDir, 'fake-action.mjs')
+    await writeFile(bin, 'process.stdout.write(JSON.stringify({ ok: true, data: { id: "x" } }) + String.fromCharCode(10)); process.exit(0)', 'utf8')
+    process.env.MEDIACRAWL_BIN = bin
+    const { ui, base } = await uiServer('omc-camp-owner-')
+    try {
+      const admin = await signIn(base)
+      const adminAuth = { 'content-type': 'application/json', cookie: admin }
+      await addUser(base, admin, 'bob')
+      const bob = await signIn(base, 'bob', 'password123')
+      const bobAuth = { 'content-type': 'application/json', cookie: bob }
+      const candidate = (type: 'reply' | 'dm') => JSON.stringify({
+        type, platform: 'douyin', itemId: 'i1', commentId: 'c1', userId: 'u1', userName: '张三',
+      })
+
+      expect((await fetch(`${base}/api/candidates`, { method: 'POST', headers: adminAuth, body: candidate('reply') })).status).toBe(201)
+      const adminCampaign = await fetch(`${base}/api/campaigns`, {
+        method: 'POST', headers: adminAuth, body: JSON.stringify({ type: 'reply', text: '收到', minSeconds: 5, maxSeconds: 5 }),
+      })
+      expect(adminCampaign.status).toBe(202)
+      const adminId = (await adminCampaign.json() as { id: string }).id
+      expect((await fetch(`${base}/api/campaigns/${adminId}`, { headers: { cookie: bob } })).status).toBe(404)
+      expect((await fetch(`${base}/api/campaigns/${adminId}/events`, { headers: { cookie: bob } })).status).toBe(404)
+      expect((await fetch(`${base}/api/campaigns/${adminId}/stop`, { method: 'POST', headers: { cookie: bob } })).status).toBe(404)
+      expect((await fetch(`${base}/api/campaigns/${adminId}`, { headers: { cookie: admin } })).status).toBe(200)
+
+      // 反向也成立：admin 看不到 bob 的群发。
+      expect((await fetch(`${base}/api/candidates`, { method: 'POST', headers: bobAuth, body: candidate('dm') })).status).toBe(201)
+      const bobCampaign = await fetch(`${base}/api/campaigns`, {
+        method: 'POST', headers: bobAuth, body: JSON.stringify({ type: 'dm', text: '你好', minSeconds: 5, maxSeconds: 5 }),
+      })
+      expect(bobCampaign.status).toBe(202)
+      const bobId = (await bobCampaign.json() as { id: string }).id
+      expect((await fetch(`${base}/api/campaigns/${bobId}`, { headers: { cookie: admin } })).status).toBe(404)
+      expect((await fetch(`${base}/api/campaigns/${bobId}`, { headers: { cookie: bob } })).status).toBe(200)
+    } finally { await ui.close() }
+  })
+
+  it('完成的群发过 TTL 后移除，SSE 订阅者自动结束', async () => {
+    process.env.OMC_CAMPAIGN_TTL_MS = '100'
+    const binDir = await tempDir('omc-bin-camp-ttl-')
+    const bin = join(binDir, 'slow-action.mjs')
+    await writeFile(bin, 'setTimeout(() => { process.stdout.write(JSON.stringify({ ok: true, data: { id: "x" } }) + String.fromCharCode(10)); process.exit(0) }, 80)', 'utf8')
+    process.env.MEDIACRAWL_BIN = bin
+    const { ui, base } = await uiServer('omc-camp-ttl-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      expect((await fetch(`${base}/api/candidates`, {
+        method: 'POST', headers: auth,
+        body: JSON.stringify({ type: 'dm', platform: 'douyin', itemId: 'manual', userId: 'https://www.douyin.com/user/x' }),
+      })).status).toBe(201)
+      const started = await fetch(`${base}/api/campaigns`, {
+        method: 'POST', headers: auth, body: JSON.stringify({ type: 'dm', text: '你好', minSeconds: 5, maxSeconds: 5 }),
+      })
+      expect(started.status).toBe(202)
+      const { id } = await started.json() as { id: string }
+      const text = await (await fetch(`${base}/api/campaigns/${id}/events`, { headers: { cookie } })).text()
+      expect(text).toContain('"type":"done"')
+      await new Promise((done) => setTimeout(done, 300))
+      expect((await fetch(`${base}/api/campaigns/${id}`, { headers: { cookie } })).status).toBe(404)
     } finally { await ui.close() }
   })
 
@@ -481,8 +770,18 @@ describe('web UI', () => {
         JSON.stringify({ id: 'c2', item_id: 'i1', parent_id: null, author: { id: 'u2', name: '李四' }, text: '路过看看', created_at: '2026-11-12T11:00:00+08:00', stats: { likes: 0, replies: 0 } }),
       ].join('\n') + '\n', 'utf8')
 
-      const built = await (await fetch(`${base}/api/leads/build`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ platform: 'douyin', intent: '多少钱,怎么卖' }) })).json() as { built: number; added: number }
-      expect(built).toMatchObject({ built: 1, added: 1 })
+      // /api/leads/build 已删（UI 从不调用）：intent 过滤改为直接测 buildLeads，
+      // 避免"为了一个死路由保留一整套 HTTP 分支"
+      const rows = (await readFile(join(dir, 'a.jsonl'), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+      const leadStore = new LeadStore(join(out, 'users', 'admin', 'leads.jsonl'))
+      const builtLeads = buildLeads({
+        platform: 'douyin',
+        items: rows.filter((row) => row.kind === 'video') as never,
+        comments: rows.filter((row) => row.kind !== 'video') as never,
+        intent: ['多少钱', '怎么卖'],
+      })
+      expect(builtLeads).toHaveLength(1)
+      expect(await leadStore.upsert(builtLeads)).toMatchObject({ added: 1 })
 
       const leads = await (await fetch(`${base}/api/leads?platform=douyin`, { headers: auth })).json() as { total: number; items: Array<{ id: string; contacts: Array<{ type: string; value: string }>; matched: string[] }> }
       expect(leads.total).toBe(1)
@@ -548,7 +847,9 @@ describe('web UI', () => {
       expect(tool.status).toBe(200)
       expect(await tool.text()).toContain('dy-capture')
 
-      const bat = await fetch(`${base}/api/capture/capture-douyin.bat`)
+      // 抓取脚本现在要登录才下发（bat 里带着一次性导入令牌，不能匿名拿）
+      expect((await fetch(`${base}/api/capture/capture-douyin.bat`)).status).toBe(401)
+      const bat = await fetch(`${base}/api/capture/capture-douyin.bat`, { headers: { cookie } })
       expect(bat.status).toBe(200)
       const batText = await bat.text()
       expect(batText).toContain('/api/capture/dy-capture.mjs')
@@ -571,6 +872,62 @@ describe('web UI', () => {
       })).json() as { deleted: boolean }
       expect(tplDel.deleted).toBe(true)
       expect(((await (await fetch(`${base}/api/templates`, { headers: { cookie } })).json()) as { items: unknown[] }).items).toEqual([])
+    } finally { await ui.close() }
+  })
+
+  it('线索关联已私聊 / 已入池状态，CSV 带私聊状态与时间，候选池也能看到已私聊', async () => {
+    const { out, ui, base } = await uiServer('omc-lead-status-')
+    try {
+      const cookie = await signIn(base)
+      const root = join(out, 'users', 'admin')
+      await mkdir(root, { recursive: true })
+      const oneLead = (id: string, author: string) => ({
+        id: `douyin:${id}`, platform: 'douyin', comment_id: id, item_id: 'i1', item_title: '作品一', item_url: 'https://x/i1',
+        author_id: author, author_name: author, text: '多少钱？', created_at: '2026-11-12T10:00:00+08:00', province: '广东',
+        matched: [], contacts: [], collected_at: '2026-11-13T10:00:00+08:00',
+      })
+      await writeFile(join(root, 'leads.jsonl'), [oneLead('c1', 'u1'), oneLead('c2', 'u2'), oneLead('c3', 'u3')].map((x) => JSON.stringify(x)).join('\n') + '\n', 'utf8')
+      await writeFile(join(root, 'sent.jsonl'), [
+        JSON.stringify({ platform: 'douyin', target: 'u1', kind: 'dm', at: '2026-11-14T09:00:00+08:00', ok: true }),
+        // 失败的不算「已私聊」，可以重发
+        JSON.stringify({ platform: 'douyin', target: 'u2', kind: 'dm', at: '2026-11-14T09:05:00+08:00', ok: false }),
+        JSON.stringify({ platform: 'douyin', target: 'c3', kind: 'reply', at: '2026-11-14T09:10:00+08:00', ok: true }),
+      ].join('\n') + '\n', 'utf8')
+      await writeFile(join(root, 'candidates.json'), JSON.stringify({
+        version: 1,
+        items: [
+          { id: 'k1', type: 'dm', platform: 'douyin', itemId: 'i1', commentId: null, userId: 'u1', userName: 'u1', note: null, added_at: '2026-11-13T10:00:00+08:00' },
+          { id: 'k2', type: 'dm', platform: 'douyin', itemId: 'i1', commentId: null, userId: 'u2', userName: 'u2', note: null, added_at: '2026-11-13T10:00:00+08:00' },
+        ],
+      }), 'utf8')
+
+      const listed = await (await fetch(`${base}/api/leads?platform=douyin`, { headers: { cookie } })).json() as {
+        total: number
+        items: Array<{ id: string; dm_sent_at?: string; in_pool?: boolean }>
+      }
+      expect(listed.total).toBe(3)
+      const byId = new Map(listed.items.map((lead) => [lead.id, lead]))
+      expect(byId.get('douyin:c1')).toMatchObject({ dm_sent_at: '2026-11-14T09:00:00+08:00', in_pool: true })
+      expect(byId.get('douyin:c2')).toMatchObject({ in_pool: true })
+      expect(byId.get('douyin:c2')!.dm_sent_at).toBeUndefined()
+      expect(byId.get('douyin:c3')!.dm_sent_at).toBeUndefined()
+      expect(byId.get('douyin:c3')!.in_pool).toBeUndefined()
+
+      // 账本才是唯一真源：线索文件里不落这两个字段
+      const rawLeads = await readFile(join(root, 'leads.jsonl'), 'utf8')
+      expect(rawLeads).not.toContain('dm_sent_at')
+      expect(rawLeads).not.toContain('in_pool')
+
+      const csv = Buffer.from(await (await fetch(`${base}/api/leads/export.csv?platform=douyin`, { headers: { cookie } })).arrayBuffer()).toString('utf8')
+      expect(csv.split('\r\n')[0]).toContain('私聊状态,私聊时间')
+      expect(csv).toContain(',已私聊,2026-11-14T09:00:00+08:00')
+      expect(csv.match(/,未私聊,/g)).toHaveLength(2)
+
+      const pool = await (await fetch(`${base}/api/candidates`, { headers: { cookie } })).json() as {
+        candidates: Array<{ id: string; dm_sent_at?: string }>
+      }
+      expect(pool.candidates.find((one) => one.id === 'k1')?.dm_sent_at).toBe('2026-11-14T09:00:00+08:00')
+      expect(pool.candidates.find((one) => one.id === 'k2')?.dm_sent_at).toBeUndefined()
     } finally { await ui.close() }
   })
 
@@ -629,6 +986,51 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('删除用户默认保留数据，purgeData 需要二次确认且拒绝路径越界', async () => {
+    const { out, ui, base } = await uiServer('omc-user-purge-')
+    try {
+      const admin = await signIn(base)
+      const adminAuth = { cookie: admin }
+      await addUser(base, admin, 'bob')
+      await addUser(base, admin, 'carol')
+      const bobDir = join(out, 'users', 'bob')
+      const carolDir = join(out, 'users', 'carol')
+      await mkdir(bobDir, { recursive: true })
+      await mkdir(carolDir, { recursive: true })
+      await writeFile(join(bobDir, 'keep.jsonl'), '{}\n', 'utf8')
+      await writeFile(join(carolDir, 'gone.jsonl'), '{}\n', 'utf8')
+
+      // 默认只删账号，数据目录保留。
+      expect((await fetch(`${base}/api/users/bob`, { method: 'DELETE', headers: adminAuth })).status).toBe(200)
+      expect((await readdir(bobDir)).length).toBeGreaterThan(0)
+
+      // 开了 purgeData 但没有 confirm，拒绝且数据仍在。
+      const noConfirm = await fetch(`${base}/api/users/carol?purgeData=1`, { method: 'DELETE', headers: adminAuth })
+      expect(noConfirm.status).toBe(400)
+      expect((await readdir(carolDir)).length).toBeGreaterThan(0)
+
+      // confirm 写错用户名也不行。
+      const wrongConfirm = await fetch(`${base}/api/users/carol?purgeData=1&confirm=bob`, { method: 'DELETE', headers: adminAuth })
+      expect(wrongConfirm.status).toBe(400)
+      expect((await readdir(carolDir)).length).toBeGreaterThan(0)
+
+      const purged = await fetch(`${base}/api/users/carol?purgeData=1&confirm=carol`, { method: 'DELETE', headers: adminAuth })
+      expect(purged.status).toBe(200)
+      expect((await purged.json() as { purgedData: boolean }).purgedData).toBe(true)
+      await expect(readdir(carolDir)).rejects.toThrow()
+
+      // 路径越界（编码的 ../）在接口层也必须被拒。
+      const victim = join(out, 'victim')
+      await mkdir(victim, { recursive: true })
+      await writeFile(join(victim, 'secret.txt'), 'keep\n', 'utf8')
+      const traversal = await fetch(`${base}/api/users/${encodeURIComponent('../victim')}?purgeData=1&confirm=${encodeURIComponent('../victim')}`, {
+        method: 'DELETE', headers: adminAuth,
+      })
+      expect(traversal.status).toBe(400)
+      expect(await readFile(join(victim, 'secret.txt'), 'utf8')).toBe('keep\n')
+    } finally { await ui.close() }
+  })
+
   it('registers a real-name account, blocks it until approved, and lets admin reset the password', async () => {
     const { ui, base } = await uiServer('omc-ui-reg-')
     const login = (username: string, password: string) => fetch(`${base}/api/login`, {
@@ -660,6 +1062,28 @@ describe('web UI', () => {
       expect((await fetch(`${base}/api/users/${encodeURIComponent('张三')}/status`, { method: 'POST', headers: auth, body: JSON.stringify({ status: 'disabled' }) })).status).toBe(200)
       expect((await login('张三', 'newpassw0rd!')).status).toBe(403)
     } finally { await ui.close() }
+  })
+
+  it('凭证缺私钥时，私信发送前就被挡住并说明原因', async () => {
+    const { out, ui, base } = await uiServer('omc-keyless-')
+    try {
+      const cookie = await signIn(base)
+      // 造一份没有 private_key 的凭证：这正是「王晓桐」那个号的真实状态
+      const authFile = join(out, 'users', 'admin', '.catbus', 'auth', 'douyin', 'web', 'default.json')
+      await mkdir(dirname(authFile), { recursive: true })
+      await writeFile(authFile, JSON.stringify({ platform: 'douyin', endpoint: 'web', account: 'default', user: { id: 'x' }, scopes: { main: { tokens: {} } }, device: {} }) + '\n')
+      const res = await fetch(`${base}/api/chat/send`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ platform: 'douyin', peerId: 'MS4wLjABAAAAS-JyHtruxnSkbGn4X0jEPm0Smk8_uuuJS3D4UL9RaTA', text: '你好' }),
+      })
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { code?: string; error?: string }
+      expect(body.code).toBe('NO_PRIVATE_KEY')
+      expect(body.error).toContain('私钥')
+    } finally {
+      await ui.close()
+    }
   })
 
   it('stores a per-user lexicon, lists chat threads, and exposes usage to admins only', async () => {
@@ -760,6 +1184,72 @@ describe('web UI', () => {
     } finally { await ui.close() }
   })
 
+  it('serves the comment tree of a freshly crawled item through /api/records/comments', async () => {
+    const cmt = (id: string, itemId: string, replies: number | null = null, parentId: string | null = null): Comment =>
+      ({ id, item_id: itemId, parent_id: parentId, author: null, text: `评论 ${id}`, created_at: null, stats: { likes: null, replies } })
+    const client: CrawlPlatformClient = {
+      async search() { return { items: [item('i1'), item('i2')], hasMore: false, cursor: null } },
+      async detail(id) { return item(id.replace('https://example.test/', '')) },
+      async comments(ref) {
+        return ref.endsWith('i1')
+          ? [cmt('a1', 'i1', 2), cmt('a2', 'i1', 0), cmt('a3', 'i1', 0), cmt('a4', 'i1', 0)]
+          : [cmt('b1', 'i2', 0), cmt('b2', 'i2', 0), cmt('b3', 'i2', 0)]
+      },
+      async subComments(_ref, cid) { return [cmt(`${cid}-r1`, 'i1', null, cid), cmt(`${cid}-r2`, 'i1', null, cid)] },
+      async creator(id) { return user(id) },
+      async creatorItems() { return [] },
+      async download() { return 0 },
+    }
+    const { out, ui, base } = await uiServer('omc-ui-comments-', () => client)
+    try {
+      const cookie = await signIn(base)
+      const auth = { 'content-type': 'application/json', cookie }
+      // 先打开一次「已采数据」，让 loadIndex 的缓存先填上，再看采集结束后会不会刷新
+      expect((await (await fetch(`${base}/api/records?platform=xhs`, { headers: { cookie } })).json() as { items: unknown[] }).items).toEqual([])
+      const started = await fetch(`${base}/api/jobs`, { method: 'POST', headers: auth, body: JSON.stringify({ platform: 'xhs', type: 'search', keywords: 'k', maxItems: 5, comments: true, subComments: true, maxComments: 50, sleep: '0' }) })
+      const { id } = await started.json() as { id: string }
+      await (await fetch(`${base}/api/jobs/${id}/events`, { headers: { cookie } })).text()
+
+      const records = await (await fetch(`${base}/api/records?platform=xhs`, { headers: { cookie } })).json() as { items: Array<{ id: string; comments: number }> }
+      expect(records.items.map((one) => [one.id, one.comments]).sort()).toEqual([['i1', 6], ['i2', 3]])
+      const one = await (await fetch(`${base}/api/records/comments?platform=xhs&item=i1`, { headers: { cookie } })).json() as { comments: Array<{ id: string; children: Array<{ id: string }> }> }
+      expect(one.comments.map((c) => c.id)).toEqual(['a1', 'a2', 'a3', 'a4'])
+      expect(one.comments[0]!.children.map((c) => c.id)).toEqual(['a1-r1', 'a1-r2'])
+      const other = await (await fetch(`${base}/api/records/comments?platform=xhs&item=i2`, { headers: { cookie } })).json() as { comments: unknown[] }
+      expect(other.comments).toHaveLength(3)
+
+      const jobs = await readFile(join(out, 'users', 'admin', 'jobs.jsonl'), 'utf8')
+      const recorded = JSON.parse(jobs.trim().split('\n').pop()!) as { comments: number; newComments: number; status: string }
+      expect(recorded).toMatchObject({ comments: 9, newComments: 9, status: 'done' })
+    } finally { await ui.close() }
+  })
+
+  it('tells the console that a platform has no comment list instead of failing the job', async () => {
+    const client: CrawlPlatformClient = {
+      async search() { return { items: [item('i1')], hasMore: false, cursor: null } },
+      async detail(id) { return item(id.replace('https://example.test/', '')) },
+      async comments() { throw new CatbusError('UNSUPPORTED', 'weibo 不支持 comment list') },
+      async subComments() { return [] },
+      async creator(id) { return user(id) },
+      async creatorItems() { return [] },
+      async download() { return 0 },
+    }
+    const { out, ui, base } = await uiServer('omc-ui-nocomments-', () => client)
+    try {
+      const cookie = await signIn(base)
+      const started = await fetch(`${base}/api/jobs`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ platform: 'weibo', type: 'search', keywords: 'k', maxItems: 5, comments: true, sleep: '0' }) })
+      const { id } = await started.json() as { id: string }
+      await (await fetch(`${base}/api/jobs/${id}/events`, { headers: { cookie } })).text()
+      const log = await (await fetch(`${base}/api/jobs/${id}/log`, { headers: { cookie } })).json() as { status: string; commentsUnsupported: boolean; lines: Array<{ message: string }> }
+      expect(log.status).toBe('done')
+      expect(log.commentsUnsupported).toBe(true)
+      expect(log.lines.some((line) => line.message.includes('暂不支持评论采集'))).toBe(true)
+      const job = (await (await fetch(`${base}/api/jobs`, { headers: { cookie } })).json() as Array<{ id: string; result: { commentsUnsupported?: boolean } }>).find((one) => one.id === id)!
+      expect(job.result.commentsUnsupported).toBe(true)
+      expect((await readdir(join(out, 'users', 'admin', 'weibo'))).some((name) => name.includes('item'))).toBe(true)
+    } finally { await ui.close() }
+  })
+
   it('stops a running crawl job', async () => {
     const out = await tempDir('omc-ui-stop-')
     const home = await tempDir('omc-stop-home-')
@@ -795,5 +1285,176 @@ describe('web UI', () => {
       expect(Array.isArray(log.lines)).toBe(true)
       expect(log.lines.length).toBeGreaterThan(0)
     } finally { await ui.close() }
+  })
+
+  it('线索同步按指纹跳过没变化的重算，采集结果变了或被清空后能重新同步', async () => {
+    const { out, ui, base } = await uiServer('omc-ui-sync-')
+    try {
+      const cookie = await signIn(base)
+      const auth = { cookie }
+      const dir = join(out, 'users', 'admin', 'douyin')
+      await mkdir(dir, { recursive: true })
+      const line = (id: string, text: string): string => JSON.stringify({ id, item_id: 'i1', parent_id: null, author: { id: `u${id}`, name: id }, text, created_at: '2026-11-12T10:00:00+08:00', stats: { likes: 0, replies: 0 } })
+      await writeFile(join(dir, 'a.jsonl'), [line('c1', '多少钱'), line('c2', '路过看看')].join('\n') + '\n', 'utf8')
+
+      const sync = async () => await (await fetch(`${base}/api/leads/sync`, { method: 'POST', headers: auth })).json() as { skipped?: boolean; built: number; added: number; total: number }
+      expect(await sync()).toMatchObject({ built: 2, added: 2, total: 2 })
+      // 内容没变：不重算，直接回原来的总数
+      expect(await sync()).toMatchObject({ skipped: true, built: 0, added: 0, total: 2 })
+
+      // 采集结果变了（多了条评论）：必须重算
+      await writeFile(join(dir, 'a.jsonl'), [line('c1', '多少钱'), line('c2', '路过看看'), line('c3', '怎么卖')].join('\n') + '\n', 'utf8')
+      const changed = await sync()
+      expect(changed.skipped).toBeUndefined()
+      expect(changed).toMatchObject({ built: 3, added: 1, total: 3 })
+
+      // 线索文件被删（用户清空线索）：下次同步要能重新补回来，不能被指纹卡死
+      await rm(join(out, 'users', 'admin', 'leads.jsonl'), { force: true })
+      expect(await sync()).toMatchObject({ built: 3, added: 3, total: 3 })
+    } finally { await ui.close() }
+  })
+})
+
+describe('perf: 线索缓存 / 账本索引 / 候选批量 / index LRU', () => {
+  const lead = (id: string, text: string): Lead => ({
+    id, platform: 'douyin', comment_id: id.slice(id.indexOf(':') + 1), item_id: 'i1',
+    item_title: '作品一', item_url: null, author_id: 'u1', author_name: '张三', text,
+    created_at: '2026-11-12T10:00:00+08:00', province: null, matched: [], contacts: [],
+    collected_at: '2026-11-12T12:00:00+08:00',
+  })
+  const lines = (leads: Lead[]): string => leads.map((one) => JSON.stringify(one)).join('\n') + '\n'
+
+  it('LeadStore 以 mtime+size 为失效键：没改动不重复读盘，外部改动后读到新内容', async () => {
+    const dir = await tempDir('omc-lead-cache-')
+    const file = join(dir, 'leads.jsonl')
+    await writeFile(file, lines([lead('douyin:c1', '一')]), 'utf8')
+    let reads = 0
+    const store = new LeadStore(file, { onRead: () => { reads++ } })
+
+    expect((await store.load()).map((one) => one.text)).toEqual(['一'])
+    expect(reads).toBe(1)
+    // 另一个实例（ui.ts 每个请求都会 new 一个）也吃同一份缓存
+    expect((await new LeadStore(file).load()).map((one) => one.text)).toEqual(['一'])
+    expect(reads).toBe(1)
+
+    // 外部改文件：指纹变了，必须重新解析
+    await writeFile(file, lines([lead('douyin:c1', '二'), lead('douyin:c2', '三')]), 'utf8')
+    expect((await store.load()).map((one) => one.text)).toEqual(['二', '三'])
+    expect(reads).toBe(2)
+  })
+
+  it('LeadStore 写之后缓存跟着走：upsert / clear 之后立刻读到新内容且不重读', async () => {
+    const dir = await tempDir('omc-lead-write-')
+    const file = join(dir, 'leads.jsonl')
+    let reads = 0
+    const store = new LeadStore(file, { onRead: () => { reads++ } })
+
+    expect(await store.upsert([lead('douyin:c1', '一'), lead('douyin:c2', '二')])).toEqual({ added: 2, total: 2 })
+    expect(reads).toBe(1) // upsert 内部读那一次
+    expect((await store.load()).map((one) => one.id)).toEqual(['douyin:c1', 'douyin:c2'])
+    expect(reads).toBe(1) // 写完的内容直接进缓存，没有再读盘
+
+    expect(await store.upsert([lead('douyin:c2', '二的改版'), lead('douyin:c3', '三')])).toEqual({ added: 1, total: 3 })
+    expect((await store.load()).map((one) => one.text)).toEqual(['一', '二的改版', '三'])
+
+    await store.clear()
+    expect(await store.load()).toEqual([])
+    expect(reads).toBe(1)
+  })
+
+  it('SendLedger 一次读入内存索引：连续 canSend 不重复读盘，record 后立即生效', async () => {
+    const dir = await tempDir('omc-ledger-')
+    const file = join(dir, 'sent.jsonl')
+    const record = (target: string, at: string): string => JSON.stringify({ platform: 'douyin', target, kind: 'reply', at, ok: true })
+    await writeFile(file, record('c1', '2026-11-12T10:00:00+08:00') + '\n', 'utf8')
+    let reads = 0
+    const ledger = new SendLedger(file, { onRead: () => { reads++ } })
+    const now = new Date('2026-11-12T20:00:00+08:00')
+
+    // 群发前校验 300 个人：只读一遍账本
+    for (let i = 0; i < 300; i++) {
+      expect((await ledger.canSend('douyin', `c${i + 100}`, 'reply', { now })).ok).toBe(true)
+    }
+    expect(reads).toBe(1)
+    expect(await ledger.canSend('douyin', 'c1', 'reply', { now })).toEqual({ ok: false, reason: '已发送过' })
+
+    // record 之后立刻能拦住同一个 target，日计数 +1，且没有整体重读
+    await ledger.record({ platform: 'douyin', target: 'c2', kind: 'reply', ok: true, at: '2026-11-12T11:00:00+08:00' })
+    expect(await ledger.canSend('douyin', 'c2', 'reply', { now })).toEqual({ ok: false, reason: '已发送过' })
+    expect(await ledger.sentToday('douyin', now)).toBe(2)
+    expect(reads).toBe(1)
+    expect(await ledger.canSend('douyin', 'c999', 'reply', { dailyCap: 2, now })).toEqual({ ok: false, reason: '今天已到上限' })
+
+    // 外部（另一个进程）追加了记录：指纹变了要整体重载
+    await appendFile(file, record('c3', '2026-11-12T12:00:00+08:00') + '\n')
+    expect(await ledger.canSend('douyin', 'c3', 'reply', { now })).toEqual({ ok: false, reason: '已发送过' })
+    expect(reads).toBe(2)
+  })
+
+  it('候选批量入池：一次读一次写，重复的只留一份，单条包装保持原语义', async () => {
+    const root = await tempDir('omc-cands-')
+    const poolFile = join(root, 'candidates.json')
+    const inputs = Array.from({ length: 300 }, (_, i) => ({ type: 'dm' as const, platform: 'douyin', itemId: 'i1', userId: `u${i}`, userName: `用户${i}` }))
+
+    const result = await addCandidates(root, inputs)
+    expect(result.added).toHaveLength(300)
+    expect(result.existing).toHaveLength(0)
+    expect(result.invalid).toBe(0)
+    expect(await listCandidates(root)).toHaveLength(300)
+
+    // 同一批里重复的只留一份；不合法的单条只计数，不影响其它条
+    const same = await addCandidates(root, [
+      { type: 'reply', platform: 'douyin', itemId: 'i1', commentId: 'k1' },
+      { type: 'reply', platform: 'douyin', itemId: 'i1', commentId: 'k1' },
+      { type: 'dm', platform: 'douyin', itemId: 'i1' }, // 没有 userId
+    ])
+    expect(same.added).toHaveLength(1)
+    expect(same.existing).toHaveLength(1)
+    expect(same.invalid).toBe(1)
+
+    // 全部重复时不重写文件
+    const before = (await stat(poolFile)).mtimeMs
+    const again = await addCandidates(root, inputs)
+    expect(again.added).toHaveLength(0)
+    expect(again.existing).toHaveLength(300)
+    expect((await stat(poolFile)).mtimeMs).toBe(before)
+
+    // 单条包装：重复时回传已有那条，非法输入照旧抛 USAGE
+    const single = await addCandidate(root, inputs[0]!)
+    expect(single.added).toBe(false)
+    expect(single.candidate.id).toBe(result.added[0]!.id)
+    await expect(addCandidate(root, { type: 'reply', platform: 'douyin', itemId: 'i1' })).rejects.toThrow('commentId')
+    expect(await listCandidates(root)).toHaveLength(301)
+  })
+
+  it('records 缓存按 MEDIACRAWL_RECORD_CACHE_MAX 做 LRU，超出淘汰最久未用', async () => {
+    resetRecordCache()
+    const saved = process.env.MEDIACRAWL_RECORD_CACHE_MAX
+    try {
+      const dirs = [await tempDir('omc-lru-a-'), await tempDir('omc-lru-b-')]
+      for (const dir of dirs) {
+        await mkdir(join(dir, 'xhs'), { recursive: true })
+        await writeFile(join(dir, 'xhs', 'a.jsonl'), JSON.stringify(item('i1')) + '\n', 'utf8')
+      }
+
+      process.env.MEDIACRAWL_RECORD_CACHE_MAX = '1'
+      const first = await loadIndex(dirs[0]!, 'xhs')
+      expect(await loadIndex(dirs[0]!, 'xhs')).toBe(first) // 命中：同一个对象
+      const other = await loadIndex(dirs[1]!, 'xhs')
+      expect(other).not.toBe(first)
+      const evicted = await loadIndex(dirs[0]!, 'xhs') // 上限 1：第一份已经被挤掉，重新解析
+      expect(evicted).not.toBe(first)
+      expect(evicted.items.map((one) => one.id)).toEqual(['i1'])
+
+      process.env.MEDIACRAWL_RECORD_CACHE_MAX = '2'
+      resetRecordCache()
+      const a = await loadIndex(dirs[0]!, 'xhs')
+      await loadIndex(dirs[1]!, 'xhs')
+      expect(await loadIndex(dirs[0]!, 'xhs')).toBe(a) // 命中后算「最近使用」，不会被自己挤掉
+    } finally {
+      if (saved === undefined) delete process.env.MEDIACRAWL_RECORD_CACHE_MAX
+      else process.env.MEDIACRAWL_RECORD_CACHE_MAX = saved
+      resetRecordCache()
+    }
   })
 })

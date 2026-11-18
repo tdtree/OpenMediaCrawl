@@ -9,8 +9,15 @@ export interface CampaignEvent {
   total?: number
 }
 
+/** SSE 订阅者：结束时显式 end，避免群发完成后连接一直挂着。 */
+export interface CampaignSubscriber {
+  send: (event: CampaignEvent) => void
+  end: () => void
+}
+
 export interface CampaignState {
   id: string
+  owner: string
   type: CandidateType
   text: string
   status: 'running' | 'done' | 'stopped' | 'error'
@@ -19,7 +26,7 @@ export interface CampaignState {
   total: number
   message: string
   history: CampaignEvent[]
-  subscribers: Set<(event: CampaignEvent) => void>
+  subscribers: Set<CampaignSubscriber>
   stop: () => void
 }
 
@@ -95,6 +102,6 @@ export async function runCampaign(
   return { sent, failed, status: 'done', message: `发完：成功 ${sent}，失败 ${failed}` }
 }
 
-export function newCampaign(type: CandidateType, text: string, total: number): CampaignState {
-  return { id: randomUUID(), type, text, status: 'running', sent: 0, failed: 0, total, message: '开始', history: [], subscribers: new Set(), stop: () => {} }
+export function newCampaign(owner: string, type: CandidateType, text: string, total: number): CampaignState {
+  return { id: randomUUID(), owner, type, text, status: 'running', sent: 0, failed: 0, total, message: '开始', history: [], subscribers: new Set(), stop: () => {} }
 }

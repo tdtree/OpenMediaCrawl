@@ -132,7 +132,7 @@ const HTML = String.raw`
 <section class="sec">
   <div class="sec-head"><h2>用户</h2><span class="sub">每个用户有独立的数据目录和独立登录态，互不可见。</span></div>
   <div class="card" id="accountUsersCard" hidden>
-    <div class="row"><h3>用户管理</h3><span class="spacer"></span><span class="tiny" id="accountUsersMsg" role="status" aria-live="polite"></span></div>
+    <div class="row"><h3>用户管理</h3><label class="tiny" style="display:flex;align-items:center;gap:6px"><input id="accountPurgeData" type="checkbox"> 删除用户时同时删除其数据（不可恢复）</label><span class="spacer"></span><span class="tiny" id="accountUsersMsg" role="status" aria-live="polite"></span></div>
     <div class="tbl-wrap" style="margin-top:8px">
       <table class="tbl account-tbl">
         <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
@@ -692,12 +692,19 @@ async function accountSetRole(btn){
 
 async function accountDeleteUser(btn){
   var name=btn.dataset.accountDel;
-  if(!confirm('删除用户 '+name+'？他的数据目录不会删。'))return;
+  var purgeBox=$('#accountPurgeData');
+  var purge=!!(purgeBox&&purgeBox.checked);
+  if(!confirm(purge
+    ?('删除用户 '+name+'，并同时删除他的全部数据目录？\n\n数据删除后不可恢复。')
+    :('删除用户 '+name+'？他的数据目录不会删。')))return;
+  if(purge&&!confirm('再次确认：永久删除 '+name+' 的采集数据和登录态，不可恢复。'))return;
   accountBtn(btn,true,'删除中…');
-  $('#accountUsersMsg').textContent='正在删除 '+name+'…';
+  $('#accountUsersMsg').textContent='正在删除 '+name+(purge?'（含数据）':'')+'…';
   try{
-    await api('/api/users/'+encodeURIComponent(name),{method:'DELETE'});
-    $('#accountUsersMsg').textContent='已删除用户 '+name+'（数据目录保留）。';
+    var url='/api/users/'+encodeURIComponent(name);
+    if(purge)url+='?purgeData=1&confirm='+encodeURIComponent(name);
+    await api(url,{method:'DELETE'});
+    $('#accountUsersMsg').textContent='已删除用户 '+name+(purge?'（数据已永久删除）':'（数据目录保留）')+'。';
     accountLoadUsers();
   }catch(e){
     $('#accountUsersMsg').textContent=e.message;
@@ -864,6 +871,9 @@ $('#accountPlatform').onchange=function(){
 $('#accountScanBtn').onclick=function(){
   var p=$('#accountPlatform').value;
   if(!p){$('#accountAccMsg').textContent='先选平台';return}
+  // 抖音私信要签名，ts_sign / 私钥 / 证书必须出自浏览器里那次真实扫码。
+  // 「扫码登录」是我们在 Node 里自己生成密钥：采集能用，私信会被平台静默丢弃（返回成功、对方收不到）。
+  if(p==='douyin' && !confirm('抖音私信必须在浏览器里扫码。\n\n「扫码登录」拿到的是本地生成的密钥，采集照常可用，但私信会被平台静默丢弃——返回成功，对方却收不到。\n\n要发私信，请用旁边的「浏览器抓取」在浏览器里扫码。\n\n仍要继续扫码登录吗？'))return;
   accountStartLogin({platform:p},this);
 };
 

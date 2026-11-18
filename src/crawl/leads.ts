@@ -1,4 +1,4 @@
-import { isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
+import { fileSignature, isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
 
 /**
  * 线索（lead）：把已经采集下来的评论再过一遍，捞出「有购买意向 / 留了联系方式」的人，
@@ -27,6 +27,13 @@ export interface Lead {
   matched: string[]
   contacts: Contact[]
   collected_at: string
+  /**
+   * 只读关联字段：读取时按发送账本关联出来（见 lead-status.ts），**不写回 leads.jsonl**。
+   * 账本才是「发过没有」的唯一真源；线索文件里只存采集到的事实。
+   */
+  dm_sent_at?: string
+  /** 只读关联字段：这个人 / 这条评论已经在候选池里。同样不写回文件。 */
+  in_pool?: boolean
 }
 
 export interface LeadFilter {
@@ -251,7 +258,7 @@ export function buildLeads(input: {
 
 // ---- CSV ----
 
-const CSV_COLUMNS = ['平台', '评论者', '评论内容', '联系方式', '地域', '命中词', '评论时间', '作品标题', '作品链接', '评论者ID', '采集时间'] as const
+const CSV_COLUMNS = ['平台', '评论者', '评论内容', '联系方式', '地域', '命中词', '评论时间', '作品标题', '作品链接', '评论者ID', '采集时间', '私聊状态', '私聊时间'] as const
 
 function escapeCsv(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
@@ -286,6 +293,9 @@ export function toCsv(leads: Lead[], options: { mask?: boolean } = {}): string {
     lead.item_url ?? '',
     lead.author_id ?? '',
     lead.collected_at,
+    // 私聊状态来自读取时的关联（lead-status.ts），未关联时按「未私聊」导出。
+    lead.dm_sent_at ? '已私聊' : '未私聊',
+    lead.dm_sent_at ?? '',
   ])
   const lines = [CSV_COLUMNS.join(','), ...rows.map((row) => row.map(escapeCsv).join(','))]
   return `\ufeff${lines.map((line) => `${line}\r\n`).join('')}`
@@ -337,32 +347,44 @@ function coerceLead(value: unknown): Lead | null {
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 500
 
+/** 线索文件的缓存条数上限：一个用户一份 leads.jsonl，上限只是防止长期运行后无界增长。 */
+const LEAD_CACHE_MAX = 8
+
+interface LeadCache {
+  signature: string
+  leads: Lead[]
+}
+
+/**
+ * 进程内缓存，键是 leads.jsonl 的路径。
+ *
+ * 必须放在模块级：`ui.ts` 每个请求都 `new LeadStore(...)`，缓存挂在实例上等于没有缓存。
+ * 失效靠文件指纹（mtime + size），外部改动文件后下一次 load 会重新解析。
+ */
+const leadCache = new Map<string, LeadCache>()
+
 /**
  * 线索库：一行一个 Lead 的 jsonl，读的时候跳过坏行，写的时候整份原子重写。
- * 数据量是「评论级」的（万级以内），整读整写足够，不需要索引。
+ * 数据量是「评论级」的（万级以内），整读整写足够，不需要索引；
+ * 读走进程内缓存（指纹见 {@link fileSignature}），写之后主动刷新缓存。
  */
 export class LeadStore {
-  constructor(private readonly file: string) {}
+  private readonly onRead: (() => void) | undefined
+
+  constructor(
+    private readonly file: string,
+    options: { /** 测试用：每次真正从磁盘读文件时回调（用来确认缓存命中没有重复读盘）。 */ onRead?: () => void } = {},
+  ) {
+    this.onRead = options.onRead
+  }
 
   async load(): Promise<Lead[]> {
-    const raw = await readTextIfExists(this.file)
-    if (!raw) return []
-    const leads = new Map<string, Lead>()
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      let parsed: unknown
-      try { parsed = JSON.parse(trimmed) } catch { continue }
-      const lead = coerceLead(parsed)
-      // 同一个 id 以最后一行为准（upsert 会重写整份文件，正常不会有重复）。
-      if (lead) leads.set(lead.id, lead)
-    }
-    return [...leads.values()]
+    return [...(await this.rows())]
   }
 
   /** 按 id 合并后原子重写；返回新增了多少条（更新不算新增）。 */
   async upsert(leads: Lead[]): Promise<{ added: number; total: number }> {
-    const current = await this.load()
+    const current = await this.rows()
     const byId = new Map(current.map((lead) => [lead.id, lead]))
     let added = 0
     for (const lead of leads) {
@@ -370,14 +392,17 @@ export class LeadStore {
       if (!byId.has(lead.id)) added++
       byId.set(lead.id, lead)
     }
-    const lines = [...byId.values()].map((lead) => JSON.stringify(lead))
+    const written = [...byId.values()]
+    const lines = written.map((lead) => JSON.stringify(lead))
     await writeFileAtomic(this.file, lines.length ? `${lines.join('\n')}\n` : '')
+    // 刚写进去的内容直接当缓存，省掉写完立刻重读一遍（同步时就是读完→写→再读）。
+    this.remember(await fileSignature(this.file), written)
     return { added, total: byId.size }
   }
 
   /** 过滤 + 倒序（新的在前，时间为空的排最后）+ 分页；total 是过滤后的总数。 */
   async query(filter: LeadFilter = {}, maxLimit = MAX_LIMIT): Promise<{ items: Lead[]; total: number }> {
-    const leads = await this.load()
+    const leads = await this.rows()
     const terms = (filter.q ?? '').trim().toLowerCase().split(/[\s/]+/).filter(Boolean)
     const province = filter.province?.trim()
     const from = filter.from?.trim()
@@ -413,5 +438,43 @@ export class LeadStore {
 
   async clear(): Promise<void> {
     await writeFileAtomic(this.file, '')
+    this.remember(await fileSignature(this.file), [])
+  }
+
+  /** 缓存里的一份线索（调用方不要改这个数组）。 */
+  private async rows(): Promise<Lead[]> {
+    const signature = await fileSignature(this.file)
+    const cached = leadCache.get(this.file)
+    if (cached && cached.signature === signature) {
+      // 命中就把这一份挪到末尾，淘汰时先丢最久没用的。
+      leadCache.delete(this.file)
+      leadCache.set(this.file, cached)
+      return cached.leads
+    }
+    this.onRead?.()
+    const raw = await readTextIfExists(this.file)
+    const byId = new Map<string, Lead>()
+    for (const line of (raw ?? '').split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      let parsed: unknown
+      try { parsed = JSON.parse(trimmed) } catch { continue }
+      const lead = coerceLead(parsed)
+      // 同一个 id 以最后一行为准（upsert 会重写整份文件，正常不会有重复）。
+      if (lead) byId.set(lead.id, lead)
+    }
+    return this.remember(signature, [...byId.values()])
+  }
+
+  /** 写入缓存并返回内容。写盘之后要重新取签名（原子重写会换掉 inode 和大小）。 */
+  private remember(signature: string, leads: Lead[]): Lead[] {
+    leadCache.delete(this.file)
+    leadCache.set(this.file, { signature, leads })
+    while (leadCache.size > LEAD_CACHE_MAX) {
+      const oldest = leadCache.keys().next().value
+      if (oldest === undefined) break
+      leadCache.delete(oldest)
+    }
+    return leads
   }
 }

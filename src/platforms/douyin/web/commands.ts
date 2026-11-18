@@ -1,11 +1,12 @@
 import { CatbusError } from '../../../core/errors.js'
+import { normalizePem } from './crypto.js'
 import { downloadMedia, readMedia } from '../../../core/files.js'
 import { cookieCredential, finishLogin, freshCredential, showQrcode, smsLogin } from '../../../core/login.js'
 import * as n from '../../../core/normalize.js'
 import { jsonLoads } from '../../../core/py.js'
 import * as rand from '../../../core/rand.js'
 import type { HandlerContext } from '../../../core/registry.js'
-import type { AuthStatus, Credential, Item, Media, Message, User } from '../../../core/schemas.js'
+import type { AuthStatus, Conversation, Credential, Item, Media, Message, User } from '../../../core/schemas.js'
 import { authError, paged } from '../../../core/toolkit.js'
 import * as api from './api.js'
 import { check, Douyin, douyin } from './client.js'
@@ -422,7 +423,7 @@ function cookieLogin(ctx: Ctx): Douyin {
   for (const c of credential.scopes.main!.cookies) c.domain = WWW_ONLY.has(c.name) ? 'www.douyin.com' : '.douyin.com'
   const tokens = credential.scopes.main!.tokens
   for (const key of ['ticket', 'ts_sign', 'client_cert']) if (typeof extra[key] === 'string') tokens[key] = extra[key]
-  if (typeof extra.private_key === 'string') credential.device.private_key = extra.private_key
+  if (typeof extra.private_key === 'string') credential.device.private_key = normalizePem(extra.private_key)
   const given = DTRAIT_KEYS.some((k) => k in extra)
   for (const key of DTRAIT_KEYS) {
     const v = given ? extra[key] : ctx.credential.device[key]
@@ -698,6 +699,12 @@ export async function msgSend(ctx: Ctx) {
   const d = await douyin(ctx)
   d.requireLogin()
   if (!d.privateKey) throw authError(ctx, '当前账号缺少 bd-ticket-guard 私钥，私信发不出去（Cookie 登录不会生成）', '在「账号与设置」用同一账号扫码登录一次；扫码会生成并保存私钥，之后私信 / 评论 / 发布才能签名')
+  // 缺 UIFID 的凭证发私信会「返回成功但对方收不到」：先跑一次推荐流把它取回来。
+  // 这里是发送前的一次读请求，不是重试，不会造成重复发送。
+  if (!d.cookie('UIFID')) {
+    ctx.log.info('凭证里缺 UIFID，先请求一次推荐流取回，然后再发私信')
+    await api.feed(d)
+  }
   const conv = await conversationFor(ctx, d)
   const outbox: Outgoing[] = []
   if (ctx.args.text) outbox.push({ messageType: im.IM_TEXT, content: im.textContent(ctx.args.text), type: 'text', text: ctx.args.text })
@@ -729,4 +736,45 @@ export function msgListen(ctx: Ctx) {
     d.requireLogin()
     yield* live.listenMessages(ctx, d)
   })()
+}
+
+/**
+ * 会话列表：默认 `--folder main` 拉已建立的会话（cmd 203），`request` 拉「消息请求」箱（陌生人发来的、还没被接受的，cmd 2047）。
+ * 陌生人私信不进主会话列表，所以排查「发出去了但对方收不到」时两个都要看：`--folder all` 合并两者（`--cursor` 只作用于主会话列表）。
+ * 消息请求箱取不到时只提示、不拖垮主列表（与 xhs 的群聊列表同样的处理）。
+ */
+export async function msgList(ctx: Ctx) {
+  const folder = String((ctx.options as Record<string, any>).folder ?? 'main')
+  const withMain = folder !== 'request'
+  const withRequest = folder !== 'main'
+  const d = await douyin(ctx)
+  d.requireLogin()
+  // 会话的成员表里同时有自己和对方，要靠自己的数字 uid 区分；取不到时 peer / last_sender 可能判不准。
+  const myUid = await d.uid().catch(() => '')
+  const out: Conversation[] = []
+  let next: string | null = null
+  let more = false
+  if (withMain) {
+    const main = await im.conversationPage(d, { cursor: ctx.cursor ?? undefined })
+    out.push(...main.rows.map((row) => norm.conversation(row, myUid, 'main')))
+    next = main.cursor
+    more = main.hasMore
+  }
+  if (withRequest) {
+    try {
+      const request = await im.strangerPage(d, { cursor: withMain ? undefined : ctx.cursor ?? undefined })
+      out.push(...request.rows.map((row) => norm.conversation(row, myUid, 'request')))
+      if (!withMain) {
+        next = request.cursor
+        more = request.hasMore
+      }
+    } catch (error) {
+      if (!withMain) throw error
+      if (!(error instanceof CatbusError && error.code === 'UPSTREAM')) throw error
+      ctx.log.warn(`消息请求箱取不到，只列已建立的会话：${error.message}`)
+    }
+  }
+  // 最近有消息的在前：没有 updated_at 的排最后。
+  out.sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))
+  return paged(out, next, more)
 }

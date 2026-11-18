@@ -95,14 +95,27 @@ function showApp(){
   refreshRunBadge();setInterval(refreshRunBadge,15000);
 }
 /* 用户管理徽标：有多少条「超过 30 天没被筛选词命中」的评论等着清理。 */
-async function refreshAdminBadge(){
+/* 徽标缓存：/api/admin/cleanup 会把每个用户的评论都扫一遍，
+   登录一次就为个角标跑一次太亏；10 分钟内复用上次结果，清理动作后强制刷新。 */
+var adminBadgeCache={at:0,count:null};
+async function refreshAdminBadge(count){
   var nav=$('#navAdmin');if(!nav)return;
-  try{
-    var r=await api('/api/admin/cleanup?days=30');
-    var n=(r&&r.totals&&r.totals.candidates)||0;
-    var old=nav.querySelector('.nav-n');if(old)old.remove();
-    if(n>0){var b=document.createElement('span');b.className='nav-n';b.textContent=n>99?'99+':String(n);b.title='有 '+n+' 条评论可清理';nav.appendChild(b)}
-  }catch(e){}
+  var n=typeof count==='number'?count:null;
+  var now=Date.now();
+  if(n===null){
+    if(adminBadgeCache.count!==null&&now-adminBadgeCache.at<10*60*1000)n=adminBadgeCache.count;
+    else{
+      try{
+        var r=await api('/api/admin/cleanup?days=30');
+        n=(r&&r.totals&&r.totals.candidates)||0;
+        adminBadgeCache={at:now,count:n};
+      }catch(e){return}
+    }
+  }else{
+    adminBadgeCache={at:now,count:n};
+  }
+  var old=nav.querySelector('.nav-n');if(old)old.remove();
+  if(n>0){var b=document.createElement('span');b.className='nav-n';b.textContent=n>99?'99+':String(n);b.title='有 '+n+' 条评论可清理';nav.appendChild(b)}
 }
 async function boot(){try{omc.state.me=await api('/api/me');showApp()}catch(e){showLogin()}}
 `;

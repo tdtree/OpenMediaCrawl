@@ -1,6 +1,7 @@
 import { randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
+import { rm } from 'node:fs/promises'
 import { CatbusError } from '../core/errors.js'
 import { isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
 
@@ -252,7 +253,39 @@ export async function setRole(username: string, role: Role): Promise<User> {
   })
 }
 
-export async function removeUser(username: string): Promise<void> {
+export interface RemoveUserOptions {
+  /** 同时删除该用户的数据目录。默认 false：只删账号，数据保留。 */
+  purgeData?: boolean
+  /** 数据根目录（即 --out）；默认 OMC_DATA_DIR，再退回 ./data。 */
+  dataRoot?: string
+}
+
+/**
+ * 计算并校验要删除的用户目录。用户名必须能通过正常账号校验，
+ * 且解析后的路径必须仍在 `<dataRoot>/users/` 里面；`..`、绝对路径、空用户名都会被拒。
+ */
+function userDataDir(dataRoot: string, username: string): string {
+  if (typeof username !== 'string' || username.trim() === '') {
+    throw new CatbusError('USAGE', '用户名不能为空')
+  }
+  if (isAbsolute(username) || username.includes('/') || username.includes('\\') || username === '.' || username === '..') {
+    throw new CatbusError('USAGE', `用户名不合法，拒绝删除数据目录：${username}`)
+  }
+  if (!USERNAME_RE.test(username) && !REALNAME_RE.test(username)) {
+    throw new CatbusError('USAGE', `用户名不合法，拒绝删除数据目录：${username}`)
+  }
+  const usersRoot = resolve(dataRoot, 'users')
+  const dir = resolve(usersRoot, username)
+  if (dir === usersRoot || !dir.startsWith(usersRoot + sep)) {
+    throw new CatbusError('USAGE', `用户名不合法，拒绝删除数据目录：${username}`)
+  }
+  return dir
+}
+
+export async function removeUser(username: string, options: RemoveUserOptions = {}): Promise<void> {
+  const purgeData = options.purgeData === true
+  // 先做路径校验（即使后面发现用户不存在），保证破坏性操作的参数永远是安全的。
+  const dataDir = purgeData ? userDataDir(options.dataRoot ?? process.env.OMC_DATA_DIR ?? './data', username) : null
   await mutate(async () => {
     const users = await readUsers()
     const index = users.findIndex((item) => item.username === username)
@@ -263,6 +296,7 @@ export async function removeUser(username: string): Promise<void> {
     users.splice(index, 1)
     await saveUsers(users)
   })
+  if (dataDir) await rm(dataDir, { recursive: true, force: true })
 }
 
 export async function changePassword(username: string, password: string): Promise<void> {

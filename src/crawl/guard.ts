@@ -1,7 +1,8 @@
+import { dayKey } from './stats.js'
 import { spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
+import { fileSignature, isoNow, readTextIfExists, writeFileAtomic } from '../core/fsutil.js'
 
 /** 发送类型：reply = 评论回复，dm = 私信。 */
 export type SendKind = 'reply' | 'dm'
@@ -13,6 +14,11 @@ export interface SentRecord {
   kind: SendKind
   at: string
   ok: boolean
+  /** 失败时的错误码（如 TOO_FAST / AUTH_EXPIRED）。只记 ok=false 的那次，
+   *  没有它就只剩「发失败了」三个字，线上根本没法定位。 */
+  code?: string
+  /** 失败原因原文，直接来自平台信封或限流器。 */
+  message?: string
 }
 
 export interface CanSendOptions {
@@ -50,10 +56,8 @@ const DEFAULT_AUTH_TIMEOUT_MS = 20_000
 /** 失败信息里保留的 stderr 长度，避免把整段报错塞进 UI。 */
 const MAX_MESSAGE_DETAIL = 300
 
-function localDateKey(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
+// 本地日口径统一放在 stats.ts，这里不再自己算（避免两套实现走歧）
+const localDateKey = (date: Date): string => dayKey(date)
 
 /**
  * 解析一行账本。坏行（不是 JSON、字段缺失或类型不对）返回 null 由调用方跳过：
@@ -78,8 +82,42 @@ function parseRecord(line: string): SentRecord | null {
   return { platform, target, kind, at, ok }
 }
 
-function sameTarget(record: SentRecord, platform: string, target: string, kind: SendKind): boolean {
-  return record.platform === platform && record.target === target && record.kind === kind
+/**
+ * 账本的内存索引：一次读盘建好，之后 canSend 只看内存。
+ *
+ * - `sent`：已经成功发过的 `platform/kind/target`（ok=false 的不在里面，失败可以重试）
+ * - `counts`：`platform/日期` → 当天成功条数
+ * - `signature`：文件指纹，外部改过账本（另一个进程 / 手工编辑）就整体重载
+ */
+interface LedgerIndex {
+  signature: string
+  records: SentRecord[]
+  sent: Set<string>
+  counts: Map<string, number>
+}
+
+function sentKey(platform: string, target: string, kind: SendKind): string {
+  return `${platform}\u0000${kind}\u0000${target}`
+}
+
+function countKey(platform: string, day: string): string {
+  return `${platform}\u0000${day}`
+}
+
+/** 把一条记录并进索引；坏时间戳（at 解析不了）不计日计数，和原来 `sentToday` 的行为一致。 */
+function indexOne(index: LedgerIndex, record: SentRecord): void {
+  if (!record.ok) return
+  index.sent.add(sentKey(record.platform, record.target, record.kind))
+  const at = new Date(record.at)
+  if (Number.isNaN(at.getTime())) return
+  const key = countKey(record.platform, localDateKey(at))
+  index.counts.set(key, (index.counts.get(key) ?? 0) + 1)
+}
+
+function buildIndex(records: SentRecord[], signature: string): LedgerIndex {
+  const index: LedgerIndex = { signature, records, sent: new Set(), counts: new Map() }
+  for (const record of records) indexOne(index, record)
+  return index
 }
 
 /**
@@ -89,6 +127,8 @@ function sameTarget(record: SentRecord, platform: string, target: string, kind: 
  * - 只有 ok=true 才算「已发送」——失败的那次可以重试；
  * - 每天按本地日期重新计数；
  * - 读不到文件当空账本，坏行直接跳过（见 {@link parseRecord}）。
+ *
+ * 读走内存索引（群发校验 300 人不再读 600 遍文件），文件被外部改动时按 mtime + size 重载。
  */
 export class SendLedger {
   private readonly file: string
@@ -96,36 +136,37 @@ export class SendLedger {
   /** 同进程内的读-改-写串行化，避免两条 record 并发时互相覆盖。 */
   private tail: Promise<unknown> = Promise.resolve()
 
-  constructor(file: string) {
+  private index: LedgerIndex | null = null
+
+  private readonly onRead: (() => void) | undefined
+
+  constructor(
+    file: string,
+    options: { /** 测试用：每次真正从磁盘读文件时回调（用来确认连续 canSend 没重复读盘）。 */ onRead?: () => void } = {},
+  ) {
     this.file = file
+    this.onRead = options.onRead
   }
 
   /** 全部有效记录（按写入顺序）。 */
   async records(): Promise<SentRecord[]> {
-    return await this.read()
+    return [...(await this.current()).records]
   }
 
   /** 是否已经成功发过这条；ok=false 的记录不算。 */
   async isSent(platform: string, target: string, kind: SendKind): Promise<boolean> {
-    return (await this.read()).some((record) => record.ok && sameTarget(record, platform, target, kind))
+    return (await this.current()).sent.has(sentKey(platform, target, kind))
   }
 
   /** 该平台今天（本地日期，按 now 决定是哪天）成功发送的条数。 */
   async sentToday(platform: string, now: Date = new Date()): Promise<number> {
-    const today = localDateKey(now)
-    let count = 0
-    for (const record of await this.read()) {
-      if (!record.ok || record.platform !== platform) continue
-      const at = new Date(record.at)
-      if (Number.isNaN(at.getTime())) continue
-      if (localDateKey(at) === today) count++
-    }
-    return count
+    return (await this.current()).counts.get(countKey(platform, localDateKey(now))) ?? 0
   }
 
   /**
    * 发送前的准入判断，按顺序检查：已发送过 → 单日上限。
    * 只读不写，真正的发送动作成功后由调用方调用 {@link record} 记账。
+   * 命中内存索引时这里没有任何文件 IO。
    */
   async canSend(
     platform: string,
@@ -134,14 +175,14 @@ export class SendLedger {
     options: CanSendOptions = {},
   ): Promise<CanSendResult> {
     const cap = options.dailyCap ?? DEFAULT_DAILY_CAP
-    if (await this.isSent(platform, target, kind)) return { ok: false, reason: '已发送过' }
-    if ((await this.sentToday(platform, options.now ?? new Date())) >= cap) {
-      return { ok: false, reason: '今天已到上限' }
-    }
+    const index = await this.current()
+    if (index.sent.has(sentKey(platform, target, kind))) return { ok: false, reason: '已发送过' }
+    const today = index.counts.get(countKey(platform, localDateKey(options.now ?? new Date()))) ?? 0
+    if (today >= cap) return { ok: false, reason: '今天已到上限' }
     return { ok: true }
   }
 
-  /** 追加一条记录并原子重写文件（读不到文件当空，坏行在重写时被丢弃）。 */
+  /** 追加一条记录并原子重写文件（读不到文件当空，坏行在重写时被丢弃），随后增量更新索引。 */
   async record(entry: Omit<SentRecord, 'at'> & { at?: string }): Promise<void> {
     const full: SentRecord = {
       platform: entry.platform,
@@ -150,10 +191,16 @@ export class SendLedger {
       at: entry.at ?? isoNow(),
       ok: entry.ok,
     }
+    // 只有失败才写原因：成功的记录保持原样，账本体积不会因为多了两个空字段膨胀
+    if (entry.code) full.code = entry.code
+    if (entry.message) full.message = entry.message
     await this.enqueue(async () => {
-      const records = await this.read()
-      records.push(full)
-      await writeFileAtomic(this.file, records.map((item) => JSON.stringify(item)).join('\n') + '\n')
+      const index = await this.current()
+      index.records.push(full)
+      await writeFileAtomic(this.file, index.records.map((item) => JSON.stringify(item)).join('\n') + '\n')
+      // 写盘后签名变了，重新取一次，否则下一次 canSend 会以为文件被别人改过而整体重读。
+      index.signature = await fileSignature(this.file)
+      indexOne(index, full)
     })
   }
 
@@ -161,7 +208,18 @@ export class SendLedger {
   async clear(): Promise<void> {
     await this.enqueue(async () => {
       await rm(this.file, { force: true })
+      this.index = null
     })
+  }
+
+  /** 当前索引；文件指纹变了就重读。 */
+  private async current(): Promise<LedgerIndex> {
+    const signature = await fileSignature(this.file)
+    if (this.index && this.index.signature === signature) return this.index
+    this.onRead?.()
+    const records = await this.read()
+    this.index = buildIndex(records, signature)
+    return this.index
   }
 
   private async read(): Promise<SentRecord[]> {

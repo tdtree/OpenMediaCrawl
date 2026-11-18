@@ -13,6 +13,9 @@ message ResponseBody {
         NewMessageNotify new_message_notify = 500;
         GetConversationInfoListV2ResponseBody create_conversation_v2_body = 609;
         GetConversationInfoListV2ResponseBody get_conversation_info_list_v2_response_body = 610;
+        // 会话列表（msg list）：oneof 的 tag 与请求的 cmd 对应。
+        InboxResponse inbox = 203;
+        GetRecentStrangerMessageRespBody get_recent_stranger_message = 2047;
     }
 }
 
@@ -43,4 +46,106 @@ message GetConversationInfoV2Response {
     int64 conversation_short_id = 2;
     int32 conversation_type = 3;
     string ticket = 4;
+}
+
+// ---- 会话列表（msg list）。字段号同桌面端 IM protobuf：
+// Conversation 的 members(6)/unread_count(15)/last_sender(20)/ext_info(50)/user_setting(51)
+// 与 ConversationMessage 的 sender(7)/content(8)/create_time(10)/sec_sender(14)。
+
+message ConversationMember {
+    int64 uid = 1;
+    int32 role = 3;
+    string sec_uid = 5;
+}
+
+message ConversationMembers {
+    repeated ConversationMember members = 1;
+}
+
+message ConversationLastSender {
+    int64 sender_uid = 1;
+    int32 status = 3;
+    string nickname = 4;
+    string sec_uid = 5;
+}
+
+message ConversationExtInfo {
+    string conversation_id = 1;
+    int64 conversation_short_id = 2;
+    int32 conversation_type = 3;
+    int64 last_active_time = 4;
+    string name = 5;
+    string avatar = 7;
+    int64 owner_uid = 12;
+    string owner_sec_uid = 13;
+    int64 create_time = 18;
+}
+
+message ConversationUserSetting {
+    string conversation_id = 1;
+    int64 conversation_short_id = 2;
+    int32 conversation_type = 3;
+    int64 last_msg_time = 10;
+}
+
+message Conversation {
+    string conversation_id = 1;
+    int64 conversation_short_id = 2;
+    int32 conversation_type = 3;
+    string ticket = 4;
+    int32 inbox_type = 5;
+    ConversationMembers members = 6;
+    int64 min_index = 10;
+    int64 max_index = 11;
+    int64 unread_count = 15;
+    ConversationLastSender last_sender = 20;
+    ConversationExtInfo ext_info = 50;
+    ConversationUserSetting user_setting = 51;
+}
+
+message ConversationMessage {
+    string conversation_id = 1;
+    int32 conversation_type = 2;
+    int64 server_message_id = 3;
+    int64 index_in_conversation = 4;
+    int64 conversation_short_id = 5;
+    int32 message_type = 6;
+    int64 sender = 7;
+    string content = 8;
+    map<string, string> ext = 9;
+    int64 create_time = 10;
+    int64 version = 11;
+    int32 status = 12;
+    int64 order_in_conversation = 13;
+    string sec_sender = 14;
+    int64 index_in_conversation_v2 = 17;
+}
+
+// cmd 203：私信页初始化（会话 + 每个会话的最近消息）。
+message InboxResponse {
+    repeated ConversationMessage messages = 1;
+    repeated Conversation conversations = 2;
+    int64 next_cursor = 3;
+    int32 inbox_unread_count = 4;
+    int32 has_more = 5;
+    int32 filter_type = 6;
+    int32 total_count = 7;
+    int64 min_cursor = 8;
+    int64 max_cursor = 9;
+}
+
+// cmd 2047：陌生人的最近消息（「消息请求」箱）。
+message ConversationRecentMessage {
+    int64 conversation_short_id = 1;
+    repeated ConversationMessage messages = 2;
+    int64 version = 3;
+    int32 badge_count = 4;
+    string conversation_id = 5;
+    repeated ConversationMessage ext_messages = 6;
+}
+
+message GetRecentStrangerMessageRespBody {
+    int64 next_stranger_version = 1;
+    repeated ConversationRecentMessage messages = 2;
+    bool has_more = 3;
 }

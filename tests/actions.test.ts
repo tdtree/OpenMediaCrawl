@@ -161,6 +161,28 @@ describe('action rate limit', () => {
     expect((await runAction(base({ account: 'acc1' }), d)).ok).toBe(true) // 距 acc1 的 0ms 已满 3 秒
   })
 
+  it('不同用户互不影响，同一用户的同一账号仍受限流约束', async () => {
+    const bin = await fakeBin()
+    let clock = 1_000
+    const forUser = (home: string, over: Partial<ActionInput> = {}) =>
+      deps(bin, { now: () => clock, env: { CATBUS_HOME: home }, ...over })
+
+    expect((await runAction(base({ account: 'acc1', target: 'i1' }), forUser('/home/alice'))).ok).toBe(true)
+    clock = 2_000
+    // Bob 用了同名账号 acc1，但他是另一个用户，不该被 Alice 的限流挡住。
+    expect((await runAction(base({ account: 'acc1', target: 'i2' }), forUser('/home/bob'))).ok).toBe(true)
+    clock = 2_500
+    expect(expectFail(await runAction(base({ account: 'acc1', target: 'i3' }), forUser('/home/alice')), 'TOO_FAST')).toBeTruthy()
+
+    // 显式 user 与 CATBUS_HOME 都计入作用域：共用 home 时，不同 user 也彼此隔离。
+    clock = 3_000
+    expect((await runAction(base({ user: 'carol', account: 'acc1', target: 'i4' }), forUser('/home/shared'))).ok).toBe(true)
+    clock = 3_500
+    expect((await runAction(base({ user: 'dave', account: 'acc1', target: 'i5' }), forUser('/home/shared'))).ok).toBe(true)
+    clock = 4_000
+    expect(expectFail(await runAction(base({ user: 'carol', account: 'acc1', target: 'i6' }), forUser('/home/shared')), 'TOO_FAST')).toBeTruthy()
+  })
+
   it('MEDIACRAWL_ACTION_INTERVAL_MS 和 deps.minIntervalMs 可以覆盖最小间隔', async () => {
     const bin = await fakeBin()
     setEnv('MEDIACRAWL_ACTION_INTERVAL_MS', '0')

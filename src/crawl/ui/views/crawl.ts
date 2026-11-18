@@ -173,7 +173,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
           </div>
         </div>
       </div>
-      <p class="hint">二级评论要先勾「评论」；间隔写 2-5 表示每条之间随机 2~5 秒。</p>
+      <p class="hint">二级评论默认不勾（勾选后请求更多、更慢）；勾它会自动带上「评论」。间隔写 2-5 表示每条之间随机 2~5 秒。</p>
       <p class="hint">每视频评论上限填 0 表示把该作品下所有一级评论都拉完（含自动翻页）；二级评论仍按需拉取。</p>
     </details>
     <div class="crawl-sub">
@@ -213,7 +213,7 @@ var crawlFallback=[
   {id:'tiktok',name:'TikTok'},
   {id:'x',name:'X'}
 ];
-var crawlState={ready:false,platforms:crawlFallback.slice(),recPlatform:'',items:[],sel:'',prefetch:null,comments:[],kw:[],filters:[],picked:{}};
+var crawlState={ready:false,platforms:crawlFallback.slice(),recPlatform:'',items:[],sel:'',prefetch:null,comments:[],kw:[],filters:[],picked:{},noComments:false};
 var crawlReqId=0;
 var crawlIme=false;
 
@@ -471,6 +471,11 @@ function crawlEmptyRecords(){
 }
 
 function crawlEmptyComments(){
+  if(crawlState.noComments){
+    return '<div class="empty"><b>该平台暂不支持评论采集</b>'+
+      '<span class="sub">这个平台的 CLI 没有 comment list，作品能采，评论拿不到。</span>'+
+      crawlEmptyActions('')+'</div>';
+  }
   return '<div class="empty"><b>这条作品没采到评论</b>'+
     '<span class="sub">采集时勾上「评论」再跑一次，或换一条作品看。</span>'+
     crawlEmptyActions('')+'</div>';
@@ -887,6 +892,7 @@ async function crawlLoadRecords(){
     crawlMsg($('#crawlRecMsg'),'平台清单为空，先确认服务端正常。','err');
     return;
   }
+  if(platform!==crawlState.recPlatform)crawlState.noComments=false;
   crawlState.recPlatform=platform;
   if(box)box.innerHTML='<p class="loading">读取已采作品…</p>';
   if(detail)detail.innerHTML='<p class="loading">读取中…</p>';
@@ -1123,7 +1129,9 @@ async function crawlWatchJob(id){
       continue;
     }
     var label=r.status==='done'?'完成':(r.status==='stopped'?'已停止':'失败');
-    crawlMsg(msg,'任务'+label+(last?'：'+last:''),r.status==='done'?'ok':'err');
+    if(r.commentsUnsupported)crawlState.noComments=true;
+    var unsupported=r.status==='done'&&r.commentsUnsupported;
+    crawlMsg(msg,'任务'+label+(unsupported?'：该平台暂不支持评论采集（作品已落盘）':(last?'：'+last:'')),r.status==='done'?'ok':'err');
     toast('任务'+label,r.status==='done'?'ok':'err');
     try{await crawlLoadRecords()}catch(e){}
     return;

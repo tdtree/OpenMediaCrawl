@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createReadStream, existsSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { isoNow } from '../core/fsutil.js'
+import { isoNow, readTextIfExists } from '../core/fsutil.js'
 import { appendFile, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { relative } from 'node:path'
 import { dirname, extname, join, resolve, sep } from 'node:path'
@@ -15,17 +15,19 @@ import { renderPage } from './ui/index.js'
 import { ACTION_PLATFORMS, runAction, type ActionKind } from './actions.js'
 import { loadIndex, threadOf } from './records.js'
 import { LeadStore, buildLeads, toCsv } from './leads.js'
+import { annotateLeads, dmSentAt, loadLeadStatus } from './lead-status.js'
 import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
 import { loadLexicon, saveLexicon, sanitizeLexicon } from './lexicon.js'
-import { appendChat, hasMessage, listChat, listThreads } from './chat.js'
+import { appendChat, findNear, hasMessage, listChat, listThreads, parseMediaText, rewriteChat } from './chat.js'
 import { addFilterTerms, applyCleanup, applySharedCleanup, effectiveTerms, isSharedPlan, planCleanup, planCleanupFromStore, type CleanupPlan, type SharedCleanupPlan } from './cleanup.js'
 import { openContentStore } from './shared/store.js'
 import { loadSharedConfig, parseRefresh, policyFrom, sharedEnabled } from './shared/config.js'
 import { DEFAULT_SEND_CONFIG, loadSendConfig, saveSendConfig } from './send-config.js'
 import { summarize } from './stats.js'
-import { addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateType } from './candidates.js'
+import { addCandidates, addCandidate, clearCandidates, listCandidates, removeCandidate, type CandidateInput, type CandidateType } from './candidates.js'
+import { leadsSyncFingerprint, leadsSyncedPlatforms, rememberLeadsSync, resetLeadsSyncState } from './leads-sync.js'
 import { deleteTemplate, listTemplates, saveTemplate } from './templates.js'
-import { newCampaign, runCampaign, type CampaignEvent, type CampaignState } from './campaign.js'
+import { newCampaign, runCampaign, type CampaignEvent, type CampaignState, type CampaignSubscriber } from './campaign.js'
 import { changePassword, createUser, ensureAdmin, listUsers, removeUser, setRole, setStatus, usersFilePath, verifyUser, type Role, type UserStatus } from './users.js'
 import { SESSION_COOKIE, createSession, dropSession, dropUserSessions, parseCookieHeader, readSession, restoreSessions, sessionCookie } from './sessions.js'
 import type { ContentStore } from './shared/types.js'
@@ -34,6 +36,21 @@ import { PLATFORMS, findPlatform } from '../platforms/index.js'
 
 const STAR = '⭐ If OpenMediaCrawl helped you, please star https://github.com/Tommyapi/OpenMediaCrawl — donations: see README "Support".'
 const ACCOUNT_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
+/** 并发上限：单用户默认 1 个采集任务，全局默认 4 个。 */
+const DEFAULT_MAX_JOBS_PER_USER = 1
+const DEFAULT_MAX_JOBS_GLOBAL = 4
+/** 完成的任务/群发在内存里保留 30 分钟，之后从 Map 移除（SSE 已提前结束）。 */
+const DEFAULT_FINISHED_TTL_MS = 30 * 60 * 1000
+
+function envCount(name: string, fallback: number, min = 1): number {
+  const parsed = Number(process.env[name])
+  return Number.isFinite(parsed) && parsed >= min ? Math.floor(parsed) : fallback
+}
+
+function finishedTtlMs(name: string): number {
+  const parsed = Number(process.env[name])
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : DEFAULT_FINISHED_TTL_MS
+}
 
 interface Job { id: string; owner: string; status: 'running' | 'done' | 'error' | 'stopped'; options: Record<string, unknown>; result?: unknown; events: Set<ServerResponse>; history: string[]; controller?: AbortController }
 
@@ -205,6 +222,20 @@ async function userActivity(base: string, username: string, days: number): Promi
   }
 }
 
+/**
+ * 凭证里没有 device.private_key 时，私信请求签不出 ts_sign，平台一定拒绝。
+ * 直接返回一句人话，比让 CLI 抛 AUTH_EXPIRED 好懂。
+ * 凭证读不到（还没登录）时返回 null，交给 CLI 自己报错，避免误判。
+ */
+async function missingPrivateKey(home: string, platform: string): Promise<string | null> {
+  const raw = await readTextIfExists(join(home, 'auth', platform, 'web', 'default.json'))
+  if (!raw) return null
+  let credential: { device?: { private_key?: string } }
+  try { credential = JSON.parse(raw) as { device?: { private_key?: string } } } catch { return null }
+  if (credential.device?.private_key) return null
+  return '这个账号的凭证里没有私钥（send_credential），签不出 ts_sign，私信一定发不出去。请重新扫码登录；浏览器没把私钥交给页面时，用「下载 bat」抓一次即可。'
+}
+
 export async function startUiServer(options: { port?: number; host?: string; out?: string; clientFactory?: (platform: CrawlPlatform, extra: { sort?: string; env?: NodeJS.ProcessEnv }) => CrawlPlatformClient } = {}): Promise<UiHandle> {
   const host = options.host ?? '127.0.0.1'
   const base = resolve(options.out ?? './data')
@@ -219,6 +250,46 @@ export async function startUiServer(options: { port?: number; host?: string; out
   const jobs = new Map<string, Job>()
   const logins = new Map<string, LoginJob>()
   const campaigns = new Map<string, { state: CampaignState; controller: AbortController }>()
+  /** TTL 定时器只负责回收内存，不阻止进程退出；server.close 时一起清掉。 */
+  const cleanupTimers = new Set<NodeJS.Timeout>()
+  function scheduleCleanup(delayMs: number, run: () => void): void {
+    const timer = setTimeout(() => {
+      cleanupTimers.delete(timer)
+      run()
+    }, delayMs)
+    timer.unref?.()
+    cleanupTimers.add(timer)
+  }
+  function runningJobs(owner?: string): number {
+    let count = 0
+    for (const job of jobs.values()) {
+      if (job.status === 'running' && (owner === undefined || job.owner === owner)) count++
+    }
+    return count
+  }
+  function scheduleJobCleanup(job: Job): void {
+    scheduleCleanup(finishedTtlMs('OMC_JOB_TTL_MS'), () => {
+      const current = jobs.get(job.id)
+      // 只回收已经结束、且没有被新任务复用的条目；运行中的永远不清。
+      if (current !== job || current.status === 'running') return
+      for (const client of current.events) {
+        try { client.end() } catch { /* 连接可能已经断了 */ }
+      }
+      current.events.clear()
+      jobs.delete(job.id)
+    })
+  }
+  function scheduleCampaignCleanup(id: string, state: CampaignState): void {
+    scheduleCleanup(finishedTtlMs('OMC_CAMPAIGN_TTL_MS'), () => {
+      const current = campaigns.get(id)
+      if (current?.state !== state || state.status === 'running') return
+      for (const subscriber of state.subscribers) {
+        try { subscriber.end() } catch { /* 连接可能已经断了 */ }
+      }
+      state.subscribers.clear()
+      campaigns.delete(id)
+    })
+  }
   const failures = new Map<string, { count: number; until: number }>()
   const registrations = new Map<string, number[]>()
 
@@ -232,6 +303,13 @@ export async function startUiServer(options: { port?: number; host?: string; out
   const sharedDir = join(base, 'shared')
   const sharedConfig = await loadSharedConfig(sharedDir)
   const content = sharedEnabled(sharedConfig) ? openContentStore(sharedDir) : null
+  /**
+   * 抓取脚本回传凭证用的一次性令牌。
+   * bat 下载时按用户签发，抓完由脚本 POST 回来 —— 省掉「复制 dy.json → 粘贴」这一步。
+   * 一次性 + 20 分钟过期，绑用户名，泄漏面很小。
+   */
+  const captureTokens = new Map<string, { username: string; expires: number }>()
+  const CAPTURE_TOKEN_TTL_MS = 20 * 60 * 1000
   /** 用户视图 = 自己的引用 + 共享库正文/评论（旧 jsonl 仍作为兜底）。 */
   const loadUserIndex = (username: string, platform: string) =>
     loadIndex({ root: userRoot(username), store: content ?? undefined, user: username }, platform)
@@ -343,9 +421,65 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim() || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http')
       const host = req.headers.host || '127.0.0.1'
       const toolUrl = `${proto}://${host}/api/capture/dy-capture.mjs`
+      const importUrl = `${proto}://${host}/api/capture/import`
+      // 这个路由在鉴权之前，自己取一次当前用户：只有登录用户才该拿到抓取令牌
+      const who = await currentUser(req)
+      if (!who) return json(res, { error: '请先登录' }, 401)
+      // 一次性令牌：脚本抓完后可以直接把五件套 POST 回来，不用人工粘贴
+      const token = randomUUID().replace(/-/g, '')
+      captureTokens.set(token, { username: who.username, expires: Date.now() + CAPTURE_TOKEN_TTL_MS })
+      for (const [key, value] of captureTokens) if (value.expires < Date.now()) captureTokens.delete(key)
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="capture-douyin.bat"' })
-      res.end(captureBat(toolUrl))
+      res.end(captureBat(toolUrl, importUrl, token))
       return
+    }
+    if (req.method === 'POST' && url.pathname === '/api/capture/import') {
+      // 抓取脚本回传五件套（用一次性令牌鉴权，不走会话 cookie）
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const token = String(input.token ?? '')
+      const hit = captureTokens.get(token)
+      if (!hit || hit.expires < Date.now()) return json(res, { error: '令牌无效或已过期，请重新点「一键抓取」' }, 401)
+      captureTokens.delete(token) // 一次性
+      const five = input.five as Record<string, unknown> | undefined
+      if (!five || typeof five !== 'object') return json(res, { error: '缺少 five（五件套 JSON）' }, 400)
+      for (const key of ['cookie', 'ticket', 'ts_sign', 'client_cert', 'private_key']) {
+        if (typeof five[key] !== 'string' || !String(five[key]).trim()) return json(res, { error: `五件套缺少 ${key}` }, 400)
+      }
+      const entry = process.env.MEDIACRAWL_BIN ?? fileURLToPath(new URL('../cli/main.js', import.meta.url))
+      const targetHome = userHome(hit.username)
+      const runCli = (args: string[], stdin?: string): Promise<{ ok: boolean; message: string }> => new Promise((resolve) => {
+        const child = spawn(process.execPath, [entry, ...args], {
+          env: { ...process.env, CATBUS_HOME: targetHome, OPENMEDIACRAWL_NO_NAG: '1' },
+          windowsHide: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        let out = ''
+        let err = ''
+        child.stdout.on('data', (chunk) => { out += String(chunk) })
+        child.stderr.on('data', (chunk) => { err += String(chunk) })
+        child.on('error', (error) => resolve({ ok: false, message: error.message }))
+        child.on('close', (code) => {
+          const text = `${out}
+${err}`.trim()
+          const line = text.split('\n').filter(Boolean).pop() ?? ''
+          if (code === 0) return resolve({ ok: true, message: '导入成功' })
+          resolve({ ok: false, message: line || `退出码 ${code}` })
+        })
+        child.stdin.end(stdin ?? '')
+      })
+      const result = await runCli(['douyin', 'auth', 'login', '--method', 'cookie', '--cookie', '-'], JSON.stringify(five))
+      if (!result.ok) return json(res, { error: result.message }, 502)
+      // 抓齐 5 个字段 ≠ 凭证能用：profile 里的 ts_sign 可能是几小时前的旧签名，
+      // 会话 cookie 还活着、签名却已经不对。导完立刻用一个需要登录的接口验一次。
+      const probe = await runCli(['douyin', 'user', 'get', 'me'])
+      if (!probe.ok) {
+        return json(res, {
+          error: `凭证已保存，但校验未通过：${probe.message}。会话可能已失效，或抓到的是旧签名，请在浏览器里重新登录后再抓一次。`,
+          code: 'VERIFY_FAILED',
+        }, 502)
+      }
+      return json(res, { ok: true, account: hit.username, verified: true })
     }
 
     if (req.method === 'POST' && url.pathname === '/api/register') {
@@ -469,6 +603,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const login: LoginJob = { id, owner: user.username, platform, account: null, home, status: 'pending', stage: 'waiting', message: '等待二维码', deadline: Date.now() + timeout, qr: null }
       logins.set(id, login)
       json(res, { id, timeout: Math.round(timeout / 1000) }, 202)
+      // 上一轮留下的 qrcode.png 会让第一次轮询先显示旧码：扫码后等的却是新 token。开新登录前先清掉。
+      await rm(join(home, 'cache', platform, 'qrcode.png'), { force: true })
       const entry = process.env.MEDIACRAWL_BIN ?? fileURLToPath(new URL('../cli/main.js', import.meta.url))
       const args = [platform, 'auth', 'login', ...(method === 'cookie' ? ['--method', 'cookie', '--cookie', '-'] : [])]
       const child = spawn(process.execPath, [entry, ...args], { env: { ...process.env, CATBUS_HOME: home, OPENMEDIACRAWL_NO_NAG: '1' }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -654,8 +790,13 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const action = userMatch[2]
       if (req.method === 'DELETE' && !action) {
         if (user.role !== 'admin') return json(res, { error: '没有权限' }, 403)
-        try { await removeUser(target); dropUserSessions(target) } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
-        return json(res, { ok: true })
+        const purgeData = ['1', 'true', 'yes'].includes(String(url.searchParams.get('purgeData') ?? '').toLowerCase())
+        // 删数据不可恢复：必须显式传 purgeData，且 confirm 再写一遍用户名。
+        if (purgeData && url.searchParams.get('confirm') !== target) {
+          return json(res, { error: '删除数据需要二次确认：confirm 必须等于用户名' }, 400)
+        }
+        try { await removeUser(target, { purgeData, dataRoot: base }); dropUserSessions(target) } catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
+        return json(res, { ok: true, purgedData: purgeData })
       }
       if (req.method === 'POST' && action === '/status') {
         if (user.role !== 'admin') return json(res, { error: '没有权限' }, 403)
@@ -734,21 +875,16 @@ export async function startUiServer(options: { port?: number; host?: string; out
     }
 
     // ---------------------------------------------------------------- 线索
-    if (req.method === 'POST' && url.pathname === '/api/leads/build') {
-      let input: Record<string, unknown>
-      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
-      const platform = String(input.platform ?? '')
-      if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
-      const list = (value: unknown): string[] => Array.isArray(value) ? value.map((v) => String(v).trim()).filter(Boolean) : String(value ?? '').split(',').map((v) => v.trim()).filter(Boolean)
-      const index = await loadUserIndex(user.username, platform)
-      const comments = [...index.comments.values()].flat()
-      const leads = buildLeads({ platform, items: index.items, comments, intent: list(input.intent), provinces: list(input.provinces) })
-      const store = new LeadStore(join(root, 'leads.jsonl'))
-      const { added, total } = await store.upsert(leads)
-      return json(res, { platform, built: leads.length, added, total })
-    }
     if (url.pathname === '/api/leads/sync' && req.method === 'POST') {
-      const store = new LeadStore(join(root, 'leads.jsonl'))
+      const leadsFile = join(root, 'leads.jsonl')
+      const store = new LeadStore(leadsFile)
+      const leadsSource = { root: userRoot(user.username), store: content ?? undefined, user: user.username }
+      const fingerprint = await leadsSyncFingerprint(leadsSource, CRAWL_PLATFORMS, leadsFile)
+      // 采集结果和 leads.jsonl 都没变：不重算，直接把上次同步的平台和总数回给前端。
+      const unchanged = leadsSyncedPlatforms(user.username, fingerprint)
+      if (unchanged) {
+        return json(res, { skipped: true, platforms: unchanged, built: 0, added: 0, total: (await store.load()).length })
+      }
       let built = 0
       let added = 0
       const touched: string[] = []
@@ -762,6 +898,7 @@ export async function startUiServer(options: { port?: number; host?: string; out
         added += result.added
         touched.push(platform)
       }
+      await rememberLeadsSync(user.username, fingerprint.index, leadsFile, touched)
       const total = (await store.load()).length
       return json(res, { platforms: touched, built, added, total })
     }
@@ -777,7 +914,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
         limit: Number(url.searchParams.get('limit') ?? 50),
         offset: Number(url.searchParams.get('offset') ?? 0),
       })
-      return json(res, { items, total })
+      // 私聊 / 入池状态在读取时关联：账本与候选池各读一次建索引，不改 leads.jsonl。
+      return json(res, { items: annotateLeads(items, await loadLeadStatus(root)), total })
     }
     if (req.method === 'GET' && url.pathname === '/api/leads/stats') {
       const leads = await new LeadStore(join(root, 'leads.jsonl')).load()
@@ -801,7 +939,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
       }, 20000)
       const items = wanted.length ? found.filter((lead) => wanted.includes(lead.id)) : found
       if (wanted.length && !items.length) return json(res, { error: '选中的线索不在当前筛选结果里' }, 400)
-      const csv = toCsv(items, { mask: url.searchParams.get('mask') !== '0' })
+      // 导出的「私聊状态 / 私聊时间」两列与页面上同源：都来自发送账本。
+      const csv = toCsv(annotateLeads(items, await loadLeadStatus(root)), { mask: url.searchParams.get('mask') !== '0' })
       res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="leads-${Date.now()}.csv"` })
       res.end(csv)
       return
@@ -815,26 +954,28 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const wanted = new Set(ids.slice(0, 500))
       const leads = await new LeadStore(join(root, 'leads.jsonl')).load()
       const picked = leads.filter((lead) => wanted.has(lead.id))
-      let added = 0
-      let skipped = 0
+      // 一次读、一次写；没有 author_id 的线索进不了私信，单独计数。
+      const pool: CandidateInput[] = []
       let missing = 0
       for (const lead of picked) {
         if (!lead.author_id) { missing++; continue }
-        try {
-          const result = await addCandidate(root, {
-            type: 'dm',
-            platform: lead.platform,
-            itemId: lead.item_id,
-            // 私信候选按用户去重：不带 commentId，同一个人从两条评论进来只留一个。
-            userId: lead.author_id,
-            userName: lead.author_name ?? undefined,
-            note: lead.item_title ? String(lead.item_title).slice(0, 80) : undefined,
-          })
-          if (result.added) added++
-          else skipped++
-        } catch { skipped++ }
+        pool.push({
+          type: 'dm',
+          platform: lead.platform,
+          itemId: lead.item_id,
+          // 私信候选按用户去重：不带 commentId，同一个人从两条评论进来只留一个。
+          userId: lead.author_id,
+          userName: lead.author_name ?? undefined,
+          note: lead.item_title ? String(lead.item_title).slice(0, 80) : undefined,
+        })
       }
-      return json(res, { added, skipped, missing, total: picked.length })
+      const result = await addCandidates(root, pool)
+      return json(res, {
+        added: result.added.length,
+        skipped: result.existing.length + result.invalid,
+        missing,
+        total: picked.length,
+      })
     }
 
     if (req.method === 'GET' && url.pathname === '/api/dashboard') {
@@ -899,6 +1040,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
       for (const name of ['leads.jsonl', 'sent.jsonl', 'candidates.json']) {
         await rm(join(root, name), { force: true }).then(() => removed.push(name)).catch(() => {})
       }
+      // 线索文件被删了：清掉同步指纹，下次打开线索页会重新同步（不然脏检查会以为是「没变化」）。
+      resetLeadsSyncState(user.username)
       for (const name of await readdir(root)) {
         if (name.startsWith('.crawl-state-')) { await rm(join(root, name), { force: true }); removed.push(name) }
       }
@@ -922,7 +1065,17 @@ export async function startUiServer(options: { port?: number; host?: string; out
       catch (error) { return json(res, { error: error instanceof Error ? error.message : String(error) }, 400) }
     }
 
-    if (url.pathname === '/api/candidates' && req.method === 'GET') return json(res, { candidates: await listCandidates(root) })
+    if (url.pathname === '/api/candidates' && req.method === 'GET') {
+      const candidates = await listCandidates(root)
+      // 候选行上的「已私聊」徽标：与线索页同源，读账本一次建索引，不写进 candidates.json。
+      const status = await loadLeadStatus(root)
+      return json(res, {
+        candidates: candidates.map((candidate) => {
+          const sentAt = candidate.type === 'dm' ? dmSentAt(status, candidate.platform, candidate.userId) : null
+          return sentAt ? { ...candidate, dm_sent_at: sentAt } : candidate
+        }),
+      })
+    }
     if (url.pathname === '/api/candidates' && req.method === 'POST') {
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
@@ -957,24 +1110,17 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const itemId = String(input.itemId ?? '')
       const rows = Array.isArray(input.items) ? input.items as Array<Record<string, unknown>> : []
       if (!platform || !itemId || !rows.length) return json(res, { error: '需要 platform、itemId 和 items' }, 400)
-      let added = 0
-      let skipped = 0
-      for (const row of rows.slice(0, 500)) {
-        try {
-          const result = await addCandidate(root, {
-            type,
-            platform,
-            itemId,
-            commentId: row.commentId ? String(row.commentId) : undefined,
-            userId: row.userId ? String(row.userId) : undefined,
-            userName: row.userName ? String(row.userName) : undefined,
-            note: row.note ? String(row.note) : undefined,
-          })
-          if (result.added) added++
-          else skipped++
-        } catch { skipped++ }
-      }
-      return json(res, { added, skipped })
+      // 一次读、一次写：勾 500 条不再对应 1000 次全量文件读写。
+      const result = await addCandidates(root, rows.slice(0, 500).map((row) => ({
+        type,
+        platform,
+        itemId,
+        commentId: row.commentId ? String(row.commentId) : undefined,
+        userId: row.userId ? String(row.userId) : undefined,
+        userName: row.userName ? String(row.userName) : undefined,
+        note: row.note ? String(row.note) : undefined,
+      })))
+      return json(res, { added: result.added.length, skipped: result.existing.length + result.invalid })
     }
     if (url.pathname === '/api/lexicon' && req.method === 'GET') return json(res, await loadLexicon(root))
     if (url.pathname === '/api/lexicon' && req.method === 'POST') {
@@ -996,11 +1142,17 @@ export async function startUiServer(options: { port?: number; host?: string; out
       const platform = String(input.platform ?? '')
       const peerId = String(input.peerId ?? '')
       const text = String(input.text ?? '').trim()
+      // 附图：接受 images: string[] 或单个 image 字符串；可以是 http(s) URL 或容器内可读的本地路径
+      const rawImages = Array.isArray(input.images) ? input.images : input.image ? [input.image] : []
+      const images = rawImages.map((one) => String(one ?? '').trim()).filter(Boolean).slice(0, 9)
       if (!findPlatform(platform)) return json(res, { error: 'unknown platform' }, 400)
       if (!peerId) return json(res, { error: '缺少 peerId' }, 400)
-      if (!text) return json(res, { error: '内容不能为空' }, 400)
+      if (!text && !images.length) return json(res, { error: '内容不能为空' }, 400)
       if (text.length > 500) return json(res, { error: '内容上限 500 字' }, 400)
-      const outcome = await runAction({ platform, kind: 'dm', target: peerId, text }, { env: { CATBUS_HOME: home } })
+      // 私信要签 ts_sign，凭证里没有私钥时平台一定拒绝；提前说清楚，别让用户反复试。
+      const keyless = await missingPrivateKey(home, platform)
+      if (keyless) return json(res, { error: keyless, code: 'NO_PRIVATE_KEY' }, 400)
+      const outcome = await runAction({ platform, kind: 'dm', target: peerId, text, media: images }, { env: { CATBUS_HOME: home } })
       const message = await appendChat(root, {
         platform,
         peerId,
@@ -1008,9 +1160,25 @@ export async function startUiServer(options: { port?: number; host?: string; out
         direction: 'out',
         text,
         status: outcome.ok ? 'sent' : 'failed',
+        media: images.map((url) => ({ type: 'image', url })),
       })
       if (!outcome.ok) return json(res, { error: outcome.message, code: outcome.code, message }, 502)
       return json(res, { ok: true, message }, 201)
+    }
+    if (url.pathname === '/api/chat/clear' && req.method === 'POST') {
+      // 清空单个会话的本地记录（只删本地 chat.jsonl 里的行，不动平台上的消息）。
+      // 用途：历史里出现过重复导入 / 时间是「导入时刻」的旧数据，清掉再同步一次最干净。
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const peerId = String(input.peerId ?? '')
+      if (!findPlatform(platform) || !peerId) return json(res, { error: '需要 platform 和 peerId' }, 400)
+      if (input.confirm !== true) return json(res, { error: '需要 confirm: true（清空后不可恢复）' }, 400)
+      const all = await listChat(root)
+      const keep = all.filter((message) => !(message.platform === platform && message.peerId === peerId))
+      const removed = all.length - keep.length
+      if (removed) await rewriteChat(root, keep)
+      return json(res, { ok: true, removed })
     }
     if (url.pathname === '/api/chat/sync' && req.method === 'POST') {
       let input: Record<string, unknown>
@@ -1027,24 +1195,96 @@ export async function startUiServer(options: { port?: number; host?: string; out
       if (envelope.ok === false) return json(res, { error: envelope.error?.message ?? '这个平台暂不支持拉取聊天记录' }, 400)
       const rows = Array.isArray(envelope.data) ? envelope.data as Array<Record<string, unknown>> : []
       let imported = 0
+      // 发送记录用本地时间、历史用平台时间，同一条能差好几分钟；精确比对会重复入库
+      const TOLERANCE = 10 * 60 * 1000
+      const retime = new Map<string, string>()
       for (const row of rows) {
-        const text = String((row.text ?? row.content ?? (row.message as Record<string, unknown> | undefined)?.text ?? '')).trim()
-        if (!text) continue
+        let text = String((row.text ?? row.content ?? (row.message as Record<string, unknown> | undefined)?.text ?? '')).trim()
+        let media = mediaOfRow(row)
+        // 正文本身是 JSON 的图片消息（小红书 imageDataMap）：还原成媒体，别当文本显示
+        const parsed = parseMediaText(text)
+        if (parsed.media.length) {
+          text = parsed.text
+          media = [...parsed.media, ...media.filter((one) => !parsed.media.some((two) => two.url === one.url))]
+        }
+        // 纯图片消息没有文字，以前会被 continue 掉，导致「聊天记录里看不到图」
+        if (!text && !media.length) continue
         const self = Boolean(row.is_self ?? row.from_me ?? row.self)
         const rawAt = row.created_at ?? row.create_time ?? row.time
         const at = typeof rawAt === 'number' ? new Date(rawAt > 1e12 ? rawAt : rawAt * 1000).toISOString() : typeof rawAt === 'string' ? rawAt : undefined
-        if (await hasMessage(root, { platform, peerId, text, direction: self ? 'out' : 'in', at })) continue
+        const direction = self ? 'out' : 'in'
+        const dup = await hasMessage(root, { platform, peerId, text, direction, at, withinMs: TOLERANCE })
+        if (dup) {
+          // 已经在库里：如果时间差超过 1 分钟，说明这条当初是用「导入时刻」写的，顺手修正
+          if (at) {
+            const near = await findNear(root, { platform, peerId, text, direction, at, withinMs: TOLERANCE })
+            const got = near ? Date.parse(near.at) : NaN
+            if (near && Number.isFinite(got) && Math.abs(got - Date.parse(at)) > 60_000) retime.set(near.id, at)
+          }
+          continue
+        }
         await appendChat(root, {
           platform,
           peerId,
           peerName: input.peerName ? String(input.peerName) : null,
-          direction: self ? 'out' : 'in',
+          direction,
           text,
           status: self ? 'sent' : 'received',
+          media,
+          at,
         })
         imported++
       }
-      return json(res, { ok: true, imported, messages: await listChat(root, { platform, peerId }) })
+      // 修正时间 + 合并重复：旧数据里同一条消息可能既被「发送」记过、又被「历史同步」记过，
+      // 时间还差几分钟，于是显示成两条。这里按 平台|会话|方向|正文 分组，
+      // 组内时间相差在容差内的只保留一条（优先保留拿到平台时间的、其次最早的那条）。
+      let repaired = 0
+      let merged = 0
+      if (retime.size || imported) {
+        const all = await listChat(root)
+        for (const message of all) {
+          const fixed = retime.get(message.id)
+          if (fixed && fixed !== message.at) {
+            message.at = fixed
+            repaired++
+          }
+        }
+        const groups = new Map<string, typeof all>()
+        for (const message of all) {
+          const key = `${message.platform}\u0000${message.peerId}\u0000${message.direction}\u0000${message.text}`
+          const bucket = groups.get(key)
+          if (bucket) bucket.push(message)
+          else groups.set(key, [message])
+        }
+        const dropped = new Set<string>()
+        for (const bucket of groups.values()) {
+          if (bucket.length < 2) continue
+          bucket.sort((a, b) => {
+            const at = Date.parse(a.at)
+            const bt = Date.parse(b.at)
+            const aKnown = retime.has(a.id) ? 0 : 1
+            const bKnown = retime.has(b.id) ? 0 : 1
+            if (aKnown !== bKnown) return aKnown - bKnown
+            if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt
+            return 0
+          })
+          let kept = bucket[0]!
+          for (let i = 1; i < bucket.length; i++) {
+            const other = bucket[i]!
+            const kt = Date.parse(kept.at)
+            const ot = Date.parse(other.at)
+            const close = Number.isFinite(kt) && Number.isFinite(ot) ? Math.abs(kt - ot) <= TOLERANCE : true
+            if (close) {
+              dropped.add(other.id)
+              merged++
+            } else kept = other
+          }
+        }
+        if (repaired || merged) {
+          await rewriteChat(root, all.filter((message) => !dropped.has(message.id)))
+        }
+      }
+      return json(res, { ok: true, imported, repaired, merged, messages: await listChat(root, { platform, peerId }) })
     }
 
     if (url.pathname === '/api/candidates/clear' && req.method === 'POST') {
@@ -1098,8 +1338,12 @@ export async function startUiServer(options: { port?: number; host?: string; out
         else skipped.other++
       }
       if (!queue.length) return json(res, { error: '没有可发的候选（已发送过或今天到上限）', skipped }, 400)
+      if (type === 'dm') {
+        const keyless = await missingPrivateKey(home, queue[0]!.platform)
+        if (keyless) return json(res, { error: keyless, code: 'NO_PRIVATE_KEY' }, 400)
+      }
       if (queue.length > settings.batchMax) return json(res, { error: '一次最多 ' + settings.batchMax + ' 条，先清一清候选池' }, 400)
-      const state = newCampaign(type, text, queue.length)
+      const state = newCampaign(user.username, type, text, queue.length)
       const controller = new AbortController()
       state.stop = () => controller.abort()
       campaigns.set(state.id, { state, controller })
@@ -1107,39 +1351,56 @@ export async function startUiServer(options: { port?: number; host?: string; out
       void (async () => {
         const push = (event: CampaignEvent): void => {
           state.history.push(event)
-          for (const subscriber of state.subscribers) subscriber(event)
+          for (const subscriber of state.subscribers) {
+            try { subscriber.send(event) } catch { /* 连接可能已经断了 */ }
+          }
         }
-        const result = await runCampaign(queue, text, { minSeconds, maxSeconds, signal: controller.signal }, {
-          send: async (candidate, message) => {
-            const target = candidate.type === 'reply' ? candidate.commentId ?? '' : candidate.userId ?? ''
-            const outcome = candidate.type === 'reply'
-              ? await runAction({ platform: candidate.platform, kind: 'comment', target: candidate.itemId, text: message, replyTo: candidate.commentId ?? undefined }, { env: { CATBUS_HOME: home } })
-              : await runAction({ platform: candidate.platform, kind: 'dm', target: candidate.userId ?? '', text: message }, { env: { CATBUS_HOME: home } })
-            await ledger.record({ platform: candidate.platform, target, kind: candidate.type, ok: outcome.ok }).catch(() => {})
-            return outcome.ok ? { ok: true } : { ok: false, code: outcome.code, message: outcome.message }
-          },
-        }, push)
+        let result: { sent: number; failed: number; status: CampaignState['status']; message: string }
+        try {
+          result = await runCampaign(queue, text, { minSeconds, maxSeconds, signal: controller.signal }, {
+            send: async (candidate, message) => {
+              const target = candidate.type === 'reply' ? candidate.commentId ?? '' : candidate.userId ?? ''
+              const outcome = candidate.type === 'reply'
+                ? await runAction({ platform: candidate.platform, kind: 'comment', target: candidate.itemId, text: message, replyTo: candidate.commentId ?? undefined }, { env: { CATBUS_HOME: home } })
+                : await runAction({ platform: candidate.platform, kind: 'dm', target: candidate.userId ?? '', text: message }, { env: { CATBUS_HOME: home } })
+              await ledger.record({ platform: candidate.platform, target, kind: candidate.type, ok: outcome.ok, code: outcome.ok ? undefined : outcome.code, message: outcome.ok ? undefined : outcome.message }).catch(() => {})
+              return outcome.ok ? { ok: true } : { ok: false, code: outcome.code, message: outcome.message }
+            },
+          }, push)
+        } catch (error) {
+          result = { sent: state.sent, failed: state.failed, status: 'error', message: error instanceof Error ? error.message : String(error) }
+        }
         state.status = result.status
         state.sent = result.sent
         state.failed = result.failed
         state.message = result.message
         push({ type: 'done', message: result.message, time: new Date().toISOString() })
+        // 群发结束后主动断开 SSE，别让连接一直挂到 TTL 回收。
+        for (const subscriber of state.subscribers) {
+          try { subscriber.end() } catch { /* 连接可能已经断了 */ }
+        }
+        state.subscribers.clear()
+        scheduleCampaignCleanup(state.id, state)
       })()
       return
     }
     const campaignMatch = url.pathname.match(/^\/api\/campaigns\/([^/]+)(\/events|\/stop)?$/)
     if (campaignMatch) {
       const campaign = campaigns.get(campaignMatch[1]!)
-      if (!campaign) return json(res, { error: 'not found' }, 404)
+      // 归属校验：非本人一律 404，admin 也不例外（避免通过 403 泄漏 id 是否存在）。
+      if (!campaign || campaign.state.owner !== user.username) return json(res, { error: 'not found' }, 404)
       const { state, controller } = campaign
       if (req.method === 'POST' && campaignMatch[2] === '/stop') { controller.abort(); return json(res, { ok: true }) }
       if (req.method === 'GET' && campaignMatch[2] === '/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
-        const send = (event: CampaignEvent): void => { res.write(`data: ${JSON.stringify(event)}\n\n`) }
-        for (const event of state.history) send(event)
-        if (state.status === 'running') state.subscribers.add(send)
+        const subscriber: CampaignSubscriber = {
+          send: (event: CampaignEvent): void => { res.write(`data: ${JSON.stringify(event)}\n\n`) },
+          end: (): void => { res.end() },
+        }
+        for (const event of state.history) subscriber.send(event)
+        if (state.status === 'running') state.subscribers.add(subscriber)
         else res.end()
-        req.on('close', () => state.subscribers.delete(send))
+        req.on('close', () => state.subscribers.delete(subscriber))
         return
       }
       if (req.method === 'GET' && !campaignMatch[2]) {
@@ -1157,6 +1418,14 @@ export async function startUiServer(options: { port?: number; host?: string; out
       let input: Record<string, unknown>
       try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
       if (!CRAWL_PLATFORMS.includes(String(input.platform) as never) || !CRAWL_TYPES.includes(String(input.type) as never)) return json(res, { error: 'unknown platform or type' }, 400)
+      const maxPerUser = envCount('OMC_MAX_JOBS_PER_USER', DEFAULT_MAX_JOBS_PER_USER)
+      const maxGlobal = envCount('OMC_MAX_JOBS_GLOBAL', DEFAULT_MAX_JOBS_GLOBAL)
+      if (runningJobs(user.username) >= maxPerUser) {
+        return json(res, { error: `你已有 ${maxPerUser} 个采集任务在运行，每用户最多 ${maxPerUser} 个；请等任务结束或先停止后再试` }, 429)
+      }
+      if (runningJobs() >= maxGlobal) {
+        return json(res, { error: `服务器同时最多 ${maxGlobal} 个采集任务，当前已满；请稍后再试` }, 429)
+      }
       const id = randomUUID()
       const controller = new AbortController()
       const job: Job = { id, owner: user.username, status: 'running', options: input, events: new Set(), history: [], controller }
@@ -1200,7 +1469,9 @@ export async function startUiServer(options: { port?: number; host?: string; out
           }
         }
         for (const client of job.events) client.end()
+        job.events.clear()
         const counts = (job.result as { counts?: { items?: number; comments?: number; newComments?: number; reusedItems?: number; reusedComments?: number; reusedMedia?: number } } | undefined)?.counts
+        const commentsUnsupported = (job.result as { commentsUnsupported?: boolean } | undefined)?.commentsUnsupported === true
         const refs = content ? content.refsByJob(user.username, id) : []
         await appendFile(join(userRoot(user.username), 'jobs.jsonl'), JSON.stringify({
           id,
@@ -1214,8 +1485,20 @@ export async function startUiServer(options: { port?: number; host?: string; out
           reused: { items: counts?.reusedItems ?? 0, comments: counts?.reusedComments ?? 0, media: counts?.reusedMedia ?? 0 },
           itemIds: refs.length ? refs : itemIds,
           status: job.status,
+          ...(commentsUnsupported ? { commentsUnsupported: true } : {}),
         }) + '\n', 'utf8').catch(() => {})
-      })()
+        scheduleJobCleanup(job)
+      })().catch((error) => {
+        // normalize / 配置读取等发生在内层 try 之外的异常：别让 job 永远停在 running。
+        job.status = 'error'
+        const event = { type: 'error' as const, message: error instanceof Error ? error.message : String(error), time: new Date().toISOString() }
+        job.history.push(JSON.stringify(event))
+        for (const client of job.events) {
+          try { client.write(`data: ${JSON.stringify(event)}\n\n`); client.end() } catch { /* 连接可能已经断了 */ }
+        }
+        job.events.clear()
+        scheduleJobCleanup(job)
+      })
       return
     }
     const stopMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/stop$/)
@@ -1235,7 +1518,8 @@ export async function startUiServer(options: { port?: number; host?: string; out
           return { time: event.time ?? '', message: event.message ?? raw, type: event.type ?? 'log' }
         } catch { return { time: '', message: raw, type: 'log' } }
       })
-      return json(res, { id: job.id, status: job.status, lines })
+      // 平台没有 comment list 时前端要能直说「该平台暂不支持评论采集」，别让人以为是自己没勾选。
+      return json(res, { id: job.id, status: job.status, lines, commentsUnsupported: (job.result as { commentsUnsupported?: boolean } | undefined)?.commentsUnsupported === true })
     }
     const eventMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/events$/)
     if (req.method === 'GET' && eventMatch) {
@@ -1267,10 +1551,46 @@ export async function startUiServer(options: { port?: number; host?: string; out
     ...(admin.created ? { bootstrap: { username: admin.username, password: admin.password ?? '' } } : {}),
     close: () => new Promise((resolveClose, reject) => {
       for (const login of logins.values()) login.child?.kill()
+      for (const timer of cleanupTimers) clearTimeout(timer)
+      cleanupTimers.clear()
       content?.close()
       server.close((error) => error ? reject(error) : resolveClose())
     }),
   }
+}
+
+/**
+ * 从平台返回的历史消息行里抽出媒体。
+ *
+ * 各家字段不统一：抖音/小红书给 `media: [{url}]`，有的给 `images: [url]`，
+ * 还有 `attachments`。统一成 `{type, url}`，只保留能直接渲染的 http(s) 地址
+ * （本地路径浏览器打不开，前端会显示成破图，不如不存）。
+ */
+function mediaOfRow(row: Record<string, unknown>): Array<{ type: string; url: string }> {
+  const out: Array<{ type: string; url: string }> = []
+  const push = (type: string, value: unknown): void => {
+    const url = typeof value === 'string' ? value.trim() : ''
+    if (!url || !/^https?:\/\//i.test(url)) return
+    if (out.length >= 9) return
+    if (out.some((one) => one.url === url)) return
+    out.push({ type, url })
+  }
+  const walk = (list: unknown): void => {
+    if (!Array.isArray(list)) return
+    for (const one of list) {
+      if (typeof one === 'string') { push('image', one); continue }
+      if (!one || typeof one !== 'object') continue
+      const item = one as Record<string, unknown>
+      const type = String(item.type ?? item.kind ?? 'image')
+      const url = item.url ?? item.origin_url ?? item.src ?? item.cover ?? (Array.isArray(item.url_list) ? item.url_list[0] : undefined)
+      push(type.includes('video') ? 'video' : 'image', url)
+    }
+  }
+  walk(row.media)
+  walk(row.images)
+  walk(row.attachments)
+  if (typeof row.image === 'string') push('image', row.image)
+  return out
 }
 
 /** 把登录子进程的失败原因讲清楚：优先用 stdout 里的 JSON 信封，其次过滤掉二维码的终端字符。 */
@@ -1302,7 +1622,7 @@ function json(res: ServerResponse, value: unknown, status = 200): void { res.wri
 function send(res: ServerResponse, status: number, contentType: string, value: string): void { res.writeHead(status, { 'content-type': contentType }); res.end(value) }
 
 /** 本机抓取用的 .bat：从控制台拉取零依赖脚本到临时目录，用系统 Node 运行。 */
-function captureBat(toolUrl: string): string {
+function captureBat(toolUrl: string, importUrl: string, token: string): string {
   return [
     '@echo off',
     'chcp 65001 >nul',
@@ -1323,6 +1643,15 @@ function captureBat(toolUrl: string): string {
     '  pause',
     '  exit /b 1',
     ')',
+    'echo.',
+    'echo 说明：浏览器右下角会有一个状态卡片，显示进度和缺哪几项；',
+    'echo      卡片上可以点「换号重扫」或「完成并关闭」。',
+    'echo      抓齐 5 项后窗口还会保留 60 秒；检测到换号会自动重抓并覆盖。',
+    'echo      想强制每次都必须扫码：set DY_FORCE_SCAN=1',
+    'echo      想改保留时长：set DY_GRACE_MS=120000（毫秒，0 = 抓齐立刻关）',
+    'echo.',
+    `set "OMC_IMPORT_URL=${importUrl}"`,
+    `set "OMC_IMPORT_TOKEN=${token}"`,
     'node "%DIR%\\dy-capture.mjs"',
     'pause',
     '',

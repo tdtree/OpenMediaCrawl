@@ -30,6 +30,11 @@ const bag = {}
 const log = (...a) => console.log(`[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`, ...a)
 const mask = (v) => (!v ? '' : v.length <= 26 ? v : `${v.slice(0, 18)}…${v.slice(-6)}`)
 
+/** 登录被风控拦下的信号（2046「请在 App 内完成安全验证」），用来给对症提示而不是让人反复扫码。 */
+let verifyHint = false
+/** 是否已经拿到登录态（cookie 里出现 sessionid）。 */
+let loggedIn = false
+
 function defaultChrome() {
   if (process.platform === 'win32') {
     for (const p of [
@@ -80,6 +85,10 @@ function absorb(obj) {
 
 function harvest(text, src = '') {
   if (!text || typeof text !== 'string') return
+  if (!verifyHint && /"code"\s*:\s*(2046|8)\b|安全验证|verify_?center|risk_?control/i.test(text)) {
+    verifyHint = true
+    log('⚠ 检测到风控信号（2046 / 安全验证）：这次扫码被拦在设备校验上')
+  }
   if (!/bd_ticket|client_cert|sdk_cert|ts\.2\.|pub\.|BEGIN PRIVATE KEY/i.test(text)) return
   const variants = [text]
   if (text.includes('\\"')) variants.push(text.replace(/\\{1,3}"/g, '"'))
@@ -223,6 +232,7 @@ while (Date.now() < deadline) {
     const { cookies } = await cdp.send('Network.getAllCookies')
     const mine = (cookies || []).filter((c) => /(^|\.)douyin\.com$/.test(c.domain))
     if (!bag.cookie && mine.some((c) => c.name === 'sessionid' || c.name === 'sessionid_ss')) {
+      loggedIn = true
       setField('cookie', mine.map((c) => `${c.name}=${c.value}`).join('; '), 'cookies')
     }
   } catch {}
@@ -238,8 +248,33 @@ while (Date.now() < deadline) {
 }
 
 const got = ORDER.filter((k) => bag[k])
+const lack = ORDER.filter((k) => !bag[k])
 log(`结束，命中 ${got.length}/5：${got.join(', ') || '无'}`)
-if (got.length) log(`已写入 ${OUT}；到控制台「账号与设置 → 粘贴 Cookie → 导入 dy.json」。`)
+if (lack.length) log(`缺：${lack.join(', ')}`)
 save()
+
+// 结论式提示：不同缺失组合对应完全不同的失败点，别让人瞎试。
+if (got.length === 5) {
+  log(`✓ 五件套齐全，已写入 ${OUT}（权限 0600）`)
+  log('  到控制台「账号与设置 → 粘贴 Cookie → 导入 dy.json」，或：')
+  log(`  node dist/cli/main.js douyin auth login --method cookie --cookie @${OUT}`)
+} else if (!loggedIn) {
+  log('✗ 没拿到登录态（cookie 里没有 sessionid）')
+  if (verifyHint) {
+    log('  这次扫码被 2046 拦下了。注意：2046 是「登录安全验证」，不是实名认证，两回事。')
+    log('  对症入口：抖音 App → 我 → ≡ → 设置 → 账号与安全 → 安全中心 / 登录设备管理')
+    log('  做完验证后回来重跑本脚本即可；本脚本用的是持久 profile，设备会被记住。')
+  } else {
+    log('  可能没扫码，或扫码后没在手机上确认。重跑本脚本再试。')
+  }
+} else if (!bag.private_key || !bag.client_cert) {
+  log('✗ 有会话但没有 bd-ticket-guard 私钥/证书')
+  log('  后果：只能读（浏览、看私信），不能写 —— 发私信会报 AUTH_EXPIRED。')
+  log('  原因：cookie 登录不产生私钥，证书只在登录握手时签发。')
+  log('  处理：DY_FRESH=1 重跑本脚本，完整走一次扫码登录。')
+} else {
+  log('✗ 有私钥/证书但会话不全，建议 DY_FRESH=1 重跑。')
+}
+
 await browser.close()
-process.exit(got.length >= 4 ? 0 : 1)
+process.exit(got.length === 5 ? 0 : 1)

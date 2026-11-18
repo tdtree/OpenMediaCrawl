@@ -17,6 +17,8 @@ import { redact } from '../src/core/log.js'
 import * as n from '../src/core/normalize.js'
 import { describeOption, filter, flagName, parseDuration, PUBLISH } from '../src/core/options.js'
 import { jsonLoads } from '../src/core/py.js'
+import * as rand from '../src/core/rand.js'
+import type { HandlerContext } from '../src/core/registry.js'
 import { loadScript } from '../src/core/vm.js'
 import { checkMsgSend } from '../src/core/vocab.js'
 import { useTempHome } from './helpers.js'
@@ -358,5 +360,65 @@ describe('jsonLoads', () => {
       list: ['9007199254740993', Infinity],
     })
     expect(jsonLoads('"x"')).toBe('x')
+  })
+})
+
+describe('长连接：退避与重连告警', () => {
+  it('退避翻倍、封顶、jitter 落在 [全值的一半, 全值] 内', async () => {
+    const { backoffDelay } = await import('../src/core/stream.js')
+    const restore = rand.deterministic()
+    try {
+      expect([1, 2, 3, 4, 5].map((a) => backoffDelay(a, { jitter: false }))).toEqual([1000, 2000, 4000, 8000, 16000])
+      expect(backoffDelay(10, { jitter: false })).toBe(30_000)
+      expect(backoffDelay(20, { maxDelay: 15_000, jitter: false })).toBe(15_000)
+      for (const attempt of [1, 2, 3, 7, 20]) {
+        const full = Math.min(1000 * 2 ** (attempt - 1), 15_000)
+        for (let i = 0; i < 20; i++) {
+          const delay = backoffDelay(attempt, { maxDelay: 15_000 })
+          expect(delay).toBeGreaterThanOrEqual(full / 2)
+          expect(delay).toBeLessThanOrEqual(full)
+        }
+      }
+    } finally {
+      restore()
+    }
+  })
+
+  it('重连时打一行结构化告警：重连次数、断线时刻、等待时长；abort 后退出', async () => {
+    const { reconnecting } = await import('../src/core/stream.js')
+    const { CatbusError } = await import('../src/core/errors.js')
+    const restore = rand.deterministic()
+    try {
+      const ac = new AbortController()
+      const warnings: string[] = []
+      const ctx = { log: { debug() {}, info() {}, warn: (m: string) => warnings.push(m) }, signal: ac.signal } as unknown as HandlerContext
+      let calls = 0
+      const got: string[] = []
+      for await (const v of reconnecting<string>(
+        ctx,
+        async function* () {
+          if (++calls > 2) {
+            ac.abort()
+            return
+          }
+          yield `第 ${calls} 次`
+          throw new CatbusError('NETWORK', '连接被重置')
+        },
+        { maxDelay: 15_000 },
+      )) {
+        got.push(v)
+      }
+      expect(got).toEqual(['第 1 次', '第 2 次'])
+      expect(warnings.length).toBe(2)
+      const notices = warnings.map((w) => JSON.parse(w))
+      expect(notices[0]).toMatchObject({ event: 'reconnect', may_lose_messages: true, reconnects: 1, attempt: 1, reason: '连接被重置' })
+      expect(notices[1]).toMatchObject({ reconnects: 2, attempt: 1 }) // 中间收到过消息，连续次数归零
+      // 断线时刻取 core 的时钟（确定性模式下是固定值）
+      expect(notices[0].disconnected_at).toBe(new Date(rand.DEFAULT_NOW).toISOString())
+      expect(notices[0].delay_ms).toBeGreaterThanOrEqual(500)
+      expect(notices[0].delay_ms).toBeLessThanOrEqual(1000)
+    } finally {
+      restore()
+    }
   })
 })
