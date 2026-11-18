@@ -40,7 +40,16 @@ function baseClient(calls: string[], over: Partial<CrawlPlatformClient> = {}): C
 
 const tmp: string[] = []
 async function tempDir(prefix: string): Promise<string> { const d = await mkdtemp(join(tmpdir(), prefix)); tmp.push(d); return d }
-afterEach(async () => { for (const d of tmp.splice(0)) await rm(d, { recursive: true, force: true }) })
+const removeDir = async (dir: string): Promise<void> => {
+  // macOS 上后台群发可能还在写；直接 rm 偶发 ENOTEMPTY，重试几次再放弃。
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); return } catch (error) {
+      if (attempt === 5) throw error
+      await new Promise((done) => setTimeout(done, 100 * (attempt + 1)))
+    }
+  }
+}
+afterEach(async () => { for (const d of tmp.splice(0)) await removeDir(d) })
 
 describe('crawl job', () => {
   it('search → detail → comments → sub-comments (only when replies may exist), then resume skips saved items', async () => {
