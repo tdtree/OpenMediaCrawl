@@ -448,7 +448,7 @@ export async function runCrawl(options: CrawlOptions, deps: RunCrawlDeps): Promi
 
   try {
     if (options.comments && options.maxComments === 0) {
-      emit('log', '评论上限为 0（不限）：热门视频可能上万条评论，容易看起来像卡住；建议填 20-100')
+      emit('log', '评论上限为 0（不限）：会把一级评论翻完；热门视频可能上万条，看起来像卡住，需要快采可在表单填 20/100')
     }
     if (options.type === 'search') {
       if (!options.keywords.length) throw new CatbusError('USAGE', 'search needs --keywords')

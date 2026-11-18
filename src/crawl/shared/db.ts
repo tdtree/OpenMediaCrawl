@@ -105,6 +105,20 @@ CREATE INDEX IF NOT EXISTS refs_user ON refs(user, platform, last_at);
 CREATE INDEX IF NOT EXISTS refs_item ON refs(platform, item_id);
 CREATE INDEX IF NOT EXISTS refs_job ON refs(user, job_id);
 
+-- 同一作品可能被多个关键词采到：refs.keyword 只能存最后一个，这里保留完整映射。
+CREATE TABLE IF NOT EXISTS ref_keywords (
+  platform TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  user TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  job_id TEXT,
+  PRIMARY KEY (platform, item_id, user, keyword)
+);
+CREATE INDEX IF NOT EXISTS ref_keywords_user ON ref_keywords(user, platform, last_at);
+CREATE INDEX IF NOT EXISTS ref_keywords_keyword ON ref_keywords(user, platform, keyword);
+
 CREATE TABLE IF NOT EXISTS claims (
   platform TEXT NOT NULL,
   item_id TEXT NOT NULL,
@@ -152,6 +166,15 @@ export function openDatabase(dir: string): DatabaseSync {
   if (!commentColumns.some((column) => column.name === 'first_seen_at')) {
     db.exec('ALTER TABLE comments ADD COLUMN first_seen_at INTEGER NOT NULL DEFAULT 0')
     db.exec('CREATE INDEX IF NOT EXISTS comments_first_seen ON comments(platform, item_id, first_seen_at)')
+  }
+  // ref_keywords 是后加的：从 refs.keyword 回填一次，并 bump 库版本，让线索缓存重算一次。
+  const backfilled = db.prepare(`
+    INSERT OR IGNORE INTO ref_keywords(platform, item_id, user, keyword, first_at, last_at, job_id)
+    SELECT platform, item_id, user, keyword, first_at, last_at, job_id FROM refs
+    WHERE keyword IS NOT NULL AND keyword <> ''
+  `).run()
+  if (Number(backfilled.changes) > 0) {
+    db.exec("UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'version'")
   }
   return db
 }

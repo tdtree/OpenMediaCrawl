@@ -56,8 +56,9 @@ export function createSubprocessClient(platform: CrawlPlatform, extra: { sort?: 
       return asPage<Item>(await runCatbus(platform, ['item', 'search', keyword, ...sortArgs, ...pagingArgs(cursor)], env))
     },
     async detail(idOrUrl) { return (await runCatbus(platform, ['item', 'get', idOrUrl], env)).data as Item },
-    async comments(itemIdOrUrl, limit) {
+    async comments(itemIdOrUrl, limit, cursor) {
       const args = limit > 0 ? ['--limit', String(limit)] : ['--all']
+      if (cursor) args.push('--cursor', cursor)
       return asPage<Comment>(await runCatbus(platform, ['comment', 'list', itemIdOrUrl, ...args], env))
     },
     async subComments(itemIdOrUrl, commentId, limit) {

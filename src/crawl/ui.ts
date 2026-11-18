@@ -14,6 +14,7 @@ import { createSubprocessClient, runCatbus } from './client.js'
 import { renderPage } from './ui/index.js'
 import { ACTION_PLATFORMS, runAction, type ActionKind } from './actions.js'
 import { loadIndex, threadOf } from './records.js'
+import { checkNewComments } from './refresh-comments.js'
 import { LeadStore, buildLeads, toCsv } from './leads.js'
 import { annotateLeads, dmSentAt, loadLeadStatus } from './lead-status.js'
 import { SendLedger, accountStatus, DEFAULT_DAILY_CAP } from './guard.js'
@@ -837,6 +838,26 @@ ${err}`.trim()
       const index = await loadUserIndex(user.username, platform)
       return json(res, { platform, item, comments: threadOf(index.comments.get(item) ?? []) })
     }
+    if (req.method === 'POST' && url.pathname === '/api/records/check-comments') {
+      let input: Record<string, unknown>
+      try { input = JSON.parse(await body(req) || '{}') as Record<string, unknown> } catch { return json(res, { error: 'invalid JSON' }, 400) }
+      const platform = String(input.platform ?? '')
+      const item = String(input.item ?? '')
+      if (!content) return json(res, { error: '共享库未启用（OMC_SHARED=0），没法只检查新评论' }, 409)
+      if (!findPlatform(platform) || !item) return json(res, { error: '需要 platform 和 item' }, 400)
+      if (user.role !== 'admin' && !content.hasRef(user.username, platform, item)) return json(res, { error: '没有权限' }, 403)
+      const owner = randomUUID()
+      if (!content.claim(platform, item, 'comments-check', owner, 120_000)) return json(res, { error: '这个作品正在检查新评论，稍后再试' }, 409)
+      try {
+        const client = (options.clientFactory ?? createSubprocessClient)(platform as CrawlPlatform, { env: { ...process.env, CATBUS_HOME: home } })
+        const result = await checkNewComments({ client, store: content, platform, itemId: item, user: user.username })
+        return json(res, result)
+      } catch (error) {
+        return json(res, { error: error instanceof Error ? error.message : String(error) }, 400)
+      } finally {
+        content.release(platform, item, 'comments-check', owner)
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/media') {
       const platform = String(url.searchParams.get('platform') ?? '')
       const item = String(url.searchParams.get('item') ?? '')
@@ -892,7 +913,15 @@ ${err}`.trim()
         const index = await loadUserIndex(user.username, platform)
         const comments = [...index.comments.values()].flat()
         if (!index.items.length && !comments.length) continue
-        const leads = buildLeads({ platform, items: index.items, comments })
+        // 同一作品可能由多个关键词采到：从 ref_keywords 取完整列表，refs.job_id 记首次批次。
+        const itemMeta: Record<string, { keywords: string[]; batchId: string | null }> = {}
+        if (content) {
+          for (const ref of content.listRefs(user.username, platform)) itemMeta[ref.itemId] = { keywords: [], batchId: ref.jobId }
+          for (const row of content.listRefKeywords(user.username, platform)) {
+            ;(itemMeta[row.itemId] ??= { keywords: [], batchId: row.jobId }).keywords.push(row.keyword)
+          }
+        }
+        const leads = buildLeads({ platform, items: index.items, comments, itemMeta })
         const result = await store.upsert(leads)
         built += leads.length
         added += result.added
@@ -911,6 +940,9 @@ ${err}`.trim()
         hasContact: url.searchParams.get('hasContact') === '1' ? true : undefined,
         from: url.searchParams.get('from') || undefined,
         to: url.searchParams.get('to') || undefined,
+        keyword: url.searchParams.get('keyword') || undefined,
+        batch: url.searchParams.get('batch') || undefined,
+        newSince: url.searchParams.get('new') === '1' ? new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString() : undefined,
         limit: Number(url.searchParams.get('limit') ?? 50),
         offset: Number(url.searchParams.get('offset') ?? 0),
       })

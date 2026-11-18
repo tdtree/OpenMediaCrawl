@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Comment, Item, User } from '../src/core/schemas.js'
 import { CatbusError } from '../src/core/errors.js'
-import { mergeCrawlConfig } from '../src/crawl/config.js'
+import { mergeCrawlConfig, normalizeCrawlOptions } from '../src/crawl/config.js'
 import { runCrawl } from '../src/crawl/job.js'
 import { loadIndex, resetRecordCache, threadOf } from '../src/crawl/records.js'
 import { openContentStore } from '../src/crawl/shared/store.js'
@@ -335,6 +335,11 @@ describe('comments always land somewhere readable', () => {
     const thread = threadOf(list)
     expect(thread.map((one) => one.id)).toEqual(['c0', 'c1', 'c2', 'c3'])
     expect(thread[0]!.children.map((one) => one.id)).toEqual(['c4'])
+  })
+
+  it('默认把一级评论采全（maxComments=0）', () => {
+    expect(normalizeCrawlOptions({ platform: 'xhs', type: 'detail', ids: ['i1'] }).maxComments).toBe(0)
+    expect(normalizeCrawlOptions({ platform: 'xhs', type: 'search', keywords: ['k'], maxComments: 20 }).maxComments).toBe(20)
   })
 
   it('marks commentsUnsupported instead of failing the job when the platform has no comment list', async () => {
@@ -928,6 +933,20 @@ describe('web UI', () => {
       }
       expect(pool.candidates.find((one) => one.id === 'k1')?.dm_sent_at).toBe('2026-11-14T09:00:00+08:00')
       expect(pool.candidates.find((one) => one.id === 'k2')?.dm_sent_at).toBeUndefined()
+    } finally { await ui.close() }
+  })
+
+  it('检查新评论：没有新评论时明确返回 0，不写评论状态', async () => {
+    const factory = (() => ({ comments: async () => ({ items: [], hasMore: false, cursor: null }) })) as any
+    const { ui, base } = await uiServer('omc-check-comments-', factory)
+    try {
+      const cookie = await signIn(base)
+      const res = await fetch(`${base}/api/records/check-comments`, {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ platform: 'douyin', item: 'i1' }),
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ added: 0, total: 0, pages: 1, stopped: 'empty' })
     } finally { await ui.close() }
   })
 

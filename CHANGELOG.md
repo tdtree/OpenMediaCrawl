@@ -48,6 +48,9 @@
 - 触达 → 手动添加私信候选先认人：UID / sec_uid / 主页链接先解析成 sec_uid 再入池，认不出直接拒绝并提示；抖音号/昵称按搜索精确匹配，匹配不到不猜
 - 私信建会话响应不是 protobuf（风控 JSON / 空体 / 截断）时给出 HTTP 状态、原文与 logid，不再只报 `index out of range`；`unexepcted session length` 明确提示 ticket 与 cookie 不是同一次登录，需重新扫码或重新抓取 `dy.json`
 - 私信发送遇 `{"decision":"KICK"}` 识别为风控而非解析失败：自动强制刷新 identity token，并换一套信封（`auth_type=1`、不带 bd-ticket / 旧版 bd-ticket）重试一次；仍失败则停止并提示人工发一条或换号。建会话遇 `unexepcted session length` 同样按新版 `auth_type=1`、顶层不签名重试一次
+- 采集默认一级评论全量（`maxComments=0`）：Web 表单默认 0，CLI `--max-comments 0`；关键词 / 作品 / 博主三种类型都按该值执行，0 会把一级评论翻完，二级仍按勾选
+- 线索新增采集关键词与批次字段：共享库增加 `ref_keywords`（同一作品被多个关键词采到不再只留最后一个），Lead 增加 `keywords / batch_id / first_collected_at / last_seen_at`；同步时保留首次采集时间、关键词取并集；线索页对 7 天内首次出现的线索显示「新」badge，详情显示关键词与首次/最近采集时间
+- 采集详情新增「检查新评论」：只拉评论、复用作品与媒体，从第一页翻到连续遇到已知评论就停；不把 `comments_state.complete` 误标为完整，不下载媒体
 
 - 控制台会话不再过期：服务端不做 TTL，cookie 有效期 10 年（Chrome 按 400 天截断）；只有退出登录、账号被停用/删除或删 `sessions.json` 才失效
 

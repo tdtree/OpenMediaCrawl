@@ -27,6 +27,14 @@ export interface Lead {
   matched: string[]
   contacts: Contact[]
   collected_at: string
+  /** 采集这条线索时命中的采集关键词（同一作品可由多个关键词带来）。 */
+  keywords?: string[]
+  /** 首次带入这条线索的采集任务；老数据可能没有。 */
+  batch_id?: string | null
+  /** 首次入库时间（不可变）；老数据没有时回退到 collected_at。 */
+  first_collected_at?: string
+  /** 最近一次同步看到它的时间。 */
+  last_seen_at?: string
   /**
    * 只读关联字段：读取时按发送账本关联出来（见 lead-status.ts），**不写回 leads.jsonl**。
    * 账本才是「发过没有」的唯一真源；线索文件里只存采集到的事实。
@@ -45,6 +53,12 @@ export interface LeadFilter {
   /** 评论时间的下界 / 上界（ISO 字串，闭区间比较）。 */
   from?: string
   to?: string
+  /** 采集关键词（精确匹配 Lead.keywords 中的一项）。 */
+  keyword?: string
+  /** 采集任务 id（Lead.batch_id）。 */
+  batch?: string
+  /** 只保留首次采集时间 >= 该 ISO 时间的线索（用于“新”筛选）。 */
+  newSince?: string
   limit?: number
   offset?: number
 }
@@ -209,10 +223,17 @@ export function buildLeads(input: {
     text: string
     created_at?: string | null
     province?: string | null
+    /** 共享库首次见到这条评论的时间（毫秒）；没有时按本次 collected_at 算。 */
+    first_seen_at?: number
   }>
   intent?: string[]
   provinces?: string[]
   collected_at?: string
+  /** 老调用方：整批共用一个采集关键词 / 任务 id。 */
+  keyword?: string | null
+  jobId?: string | null
+  /** 按作品给出关键词明细与首次任务（共享库模式）；优先于 keyword / jobId。 */
+  itemMeta?: Record<string, { keywords?: string[]; batchId?: string | null }>
 }): Lead[] {
   const items = new Map<string, { title?: string | null; url?: string | null }>()
   for (const item of input.items) items.set(String(item.id), item)
@@ -236,6 +257,13 @@ export function buildLeads(input: {
     if (intent.length && !matched.length) continue
 
     const item = items.get(String(comment.item_id))
+    const meta = input.itemMeta?.[String(comment.item_id)]
+    const keywords = meta?.keywords?.length
+      ? [...new Set(meta.keywords)]
+      : (input.keyword ? [input.keyword] : [])
+    const firstSeen = comment.first_seen_at && comment.first_seen_at > 0
+      ? new Date(comment.first_seen_at).toISOString()
+      : (comment.created_at ?? collectedAt)
     leads.push({
       id: `${input.platform}:${comment.id}`,
       platform: input.platform,
@@ -251,6 +279,10 @@ export function buildLeads(input: {
       matched,
       contacts: extractContacts(text),
       collected_at: collectedAt,
+      keywords,
+      batch_id: meta?.batchId ?? input.jobId ?? null,
+      first_collected_at: firstSeen,
+      last_seen_at: collectedAt,
     })
   }
   return leads
@@ -341,6 +373,10 @@ function coerceLead(value: unknown): Lead | null {
     matched: Array.isArray(raw.matched) ? raw.matched.filter((m): m is string => typeof m === 'string') : [],
     contacts,
     collected_at: nullable(raw.collected_at) ?? isoNow(),
+    keywords: Array.isArray(raw.keywords) ? raw.keywords.filter((k): k is string => typeof k === 'string') : [],
+    batch_id: nullable(raw.batch_id),
+    first_collected_at: nullable(raw.first_collected_at) ?? nullable(raw.collected_at) ?? isoNow(),
+    last_seen_at: nullable(raw.last_seen_at) ?? nullable(raw.collected_at) ?? isoNow(),
   }
 }
 
@@ -389,8 +425,25 @@ export class LeadStore {
     let added = 0
     for (const lead of leads) {
       if (!lead?.id) continue
-      if (!byId.has(lead.id)) added++
-      byId.set(lead.id, lead)
+      const old = byId.get(lead.id)
+      if (!old) {
+        added++
+        byId.set(lead.id, {
+          ...lead,
+          first_collected_at: lead.first_collected_at ?? lead.collected_at,
+          last_seen_at: lead.last_seen_at ?? lead.collected_at,
+          keywords: lead.keywords ?? [],
+        })
+        continue
+      }
+      // 旧线索：首次采集时间与批次不可变；关键词取并集，其余字段用新值刷新。
+      byId.set(lead.id, {
+        ...lead,
+        keywords: [...new Set([...(old.keywords ?? []), ...(lead.keywords ?? [])])],
+        batch_id: old.batch_id ?? lead.batch_id ?? null,
+        first_collected_at: old.first_collected_at ?? lead.first_collected_at ?? lead.collected_at,
+        last_seen_at: lead.last_seen_at ?? lead.collected_at,
+      })
     }
     const written = [...byId.values()]
     const lines = written.map((lead) => JSON.stringify(lead))
@@ -410,6 +463,9 @@ export class LeadStore {
 
     const matched = leads.filter((lead) => {
       if (filter.platform && lead.platform !== filter.platform) return false
+      if (filter.keyword && !(lead.keywords ?? []).includes(filter.keyword)) return false
+      if (filter.batch && lead.batch_id !== filter.batch) return false
+      if (filter.newSince && (lead.first_collected_at ?? lead.collected_at) < filter.newSince) return false
       if (province && lead.province !== province) return false
       if (filter.hasContact !== undefined && (lead.contacts.length > 0) !== filter.hasContact) return false
       if (from || to) {

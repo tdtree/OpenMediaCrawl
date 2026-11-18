@@ -37,7 +37,7 @@ export interface SearchPage<T> {
 export interface CrawlPlatformClient {
   search(keyword: string, cursor: string | null): Promise<SearchPage<Item> | Item[]>
   detail(idOrUrl: string): Promise<Item>
-  comments(itemIdOrUrl: string, limit: number): Promise<SearchPage<Comment> | Comment[]>
+  comments(itemIdOrUrl: string, limit: number, cursor?: string | null): Promise<SearchPage<Comment> | Comment[]>
   subComments(itemIdOrUrl: string, commentId: string, limit: number): Promise<SearchPage<Comment> | Comment[]>
   creator(idOrUrl: string): Promise<User>
   creatorItems(idOrUrl: string, cursor: string | null): Promise<SearchPage<Item> | Item[]>

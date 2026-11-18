@@ -283,6 +283,45 @@ describe('LeadStore', () => {
     expect((await readFile(file, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
+  it('保留首次采集时间，关键词取并集', async () => {
+    const store = new LeadStore(await tempFile())
+    const first = buildLeads({
+      platform: 'douyin',
+      items: [{ id: 'i1', title: '作品一' }],
+      comments: [{ id: 'c1', item_id: 'i1', parent_id: null, text: '多少钱', created_at: '2026-11-01T10:00:00+08:00', first_seen_at: Date.parse('2026-11-01T00:00:00Z') }],
+      keyword: '露营',
+      jobId: 'job1',
+      collected_at: '2026-11-10T00:00:00.000Z',
+    })
+    expect(await store.upsert(first)).toEqual({ added: 1, total: 1 })
+    const second = buildLeads({
+      platform: 'douyin',
+      items: [{ id: 'i1', title: '作品一' }],
+      comments: [{ id: 'c1', item_id: 'i1', parent_id: null, text: '多少钱', created_at: '2026-11-01T10:00:00+08:00', first_seen_at: Date.parse('2026-11-01T00:00:00Z') }],
+      keyword: '消防',
+      jobId: 'job2',
+      collected_at: '2026-11-20T00:00:00.000Z',
+    })
+    expect(await store.upsert(second)).toEqual({ added: 0, total: 1 })
+    const [lead] = await store.load()
+    expect(lead!.first_collected_at).toBe('2026-11-01T00:00:00.000Z')
+    expect(lead!.keywords).toEqual(['露营', '消防'])
+    expect(lead!.batch_id).toBe('job1')
+    expect(lead!.last_seen_at).toBe('2026-11-20T00:00:00.000Z')
+    expect(lead!.collected_at).toBe('2026-11-20T00:00:00.000Z')
+  })
+
+  it('按关键词 / 批次 / 新线索筛选', async () => {
+    const store = new LeadStore(await tempFile())
+    await store.upsert([
+      makeLead({ id: 'xhs:c1', comment_id: 'c1', keywords: ['露营'], batch_id: 'j1', first_collected_at: '2026-11-01T00:00:00.000Z' }),
+      makeLead({ id: 'xhs:c2', comment_id: 'c2', keywords: ['消防'], batch_id: 'j2', first_collected_at: new Date().toISOString() }),
+    ])
+    expect((await store.query({ keyword: '露营' })).items.map((one) => one.id)).toEqual(['xhs:c1'])
+    expect((await store.query({ batch: 'j2' })).items.map((one) => one.id)).toEqual(['xhs:c2'])
+    expect((await store.query({ newSince: new Date(Date.now() - 7 * 864e5).toISOString() })).items.map((one) => one.id)).toEqual(['xhs:c2'])
+  })
+
   it('load 跳过坏行', async () => {
     const file = await tempFile()
     const good = JSON.stringify(makeLead())

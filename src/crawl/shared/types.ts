@@ -59,6 +59,17 @@ export interface RefRow {
   account: string | null
 }
 
+/** refs 的关键词明细：同一作品被多个关键词采到时各留一行。 */
+export interface RefKeywordRow {
+  platform: string
+  itemId: string
+  user: string
+  keyword: string
+  firstAt: number
+  lastAt: number
+  jobId: string | null
+}
+
 export interface ReusePolicy {
   /** 作品正文复用窗口（毫秒）。 */
   itemTtlMs: number
@@ -160,6 +171,8 @@ export interface ContentStore {
 
   addRef(user: string, platform: string, itemId: string, meta?: { jobId?: string | null; keyword?: string | null; account?: string | null; at?: number }): void
   listRefs(user: string, platform?: string): RefRow[]
+  /** 作品 → 关键词明细（同一作品可有多行）；leads 分组用。 */
+  listRefKeywords(user: string, platform?: string): RefKeywordRow[]
   hasRef(user: string, platform: string, itemId: string): boolean
   refUsers(platform: string, itemId: string): string[]
   refCount(platform: string, itemId: string): number

@@ -71,6 +71,11 @@ describe('共享内容库', () => {
       expect(store.refCount('xhs', 'i1')).toBe(2)
       expect(store.listRefs('alice', 'xhs')).toHaveLength(1)
       expect(store.listRefs('alice', 'xhs')[0]).toMatchObject({ jobId: 'j3', keyword: '露营' })
+      // 同一作品由第二个关键词采到：refs 仍一行，明细里两条都保留
+      store.addRef('alice', 'xhs', 'i1', { jobId: 'j4', keyword: '消防' })
+      expect(store.listRefKeywords('alice', 'xhs').map((row) => row.keyword).sort()).toEqual(['消防', '露营'])
+      store.clearRefs('alice')
+      expect(store.listRefKeywords('alice', 'xhs')).toHaveLength(0)
     } finally { store.close() }
   })
 

@@ -164,7 +164,7 @@ mark.crawl-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
           </select>
         </label>
         <label class="field"><span>间隔秒数</span><input id="crawlSleep" name="sleep" value="2-5" autocomplete="off" placeholder="2-5 或 3…"></label>
-        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="20" autocomplete="off" placeholder="20（0 = 不限）…"></label>
+        <label class="field"><span>每视频评论上限</span><input id="crawlMaxComments" name="maxComments" type="number" min="0" step="1" value="0" autocomplete="off" placeholder="0（不限，默认）…"></label>
         <div class="field crawl-wide"><span>附加</span>
           <div class="crawl-checks">
             <label class="check"><input type="checkbox" id="crawlOptComments" checked> 评论</label>
@@ -510,6 +510,7 @@ function crawlRenderDetail(it){
     '<div class="crawl-dt-t"><h3>'+esc(it.title||'（无标题）')+'</h3>'+
       '<p class="sub">'+esc(line)+'</p>'+
       (it.url?'<p class="tiny"><a href="'+esc(it.url)+'" target="_blank" rel="noopener">打开原页 ↗</a></p>':'<p class="tiny">没有原页链接</p>')+
+      '<div class="row" style="margin-top:8px"><button class="ghost sm" id="crawlCheckNew" type="button" title="只拉第一页起的新评论，遇到已知评论就停">检查新评论</button></div>'+
     '</div></div>'+
     '<div class="crawl-kv">'+cells+'</div>'+
     '<div class="crawl-media" id="crawlMedia" hidden></div>'+
@@ -539,7 +540,31 @@ function crawlRenderDetail(it){
     '</div>';
   /* 详情是整块重建的，筛选词块按当前状态补回来，免得词块区和筛选词脱节 */
   crawlChipRender('filter');
+  var checkNew=$('#crawlCheckNew');
+  if(checkNew)checkNew.onclick=function(){crawlCheckNewComments(it,checkNew)};
   crawlLoadMedia(it);
+}
+
+/** 单作品增量：只拉评论，遇到足够多已知评论就停；不下载媒体。 */
+async function crawlCheckNewComments(it,btn){
+  if(!it||!btn)return;
+  var label=btn.textContent;
+  btn.disabled=true;btn.textContent='检查中…';
+  try{
+    var r=await post('/api/records/check-comments',{platform:crawlState.recPlatform,item:it.id});
+    var msg=r.added?('新增 '+r.added+' 条评论（翻了 '+r.pages+' 页）'):'没有新评论';
+    toast(msg,r.added?'ok':'');
+    it.comments=r.total;
+    if(r.added)it.new_comments=(it.new_comments||0)+r.added;
+    if(r.added){try{await post('/api/leads/sync',{})}catch(e){}}
+    await crawlLoadRecords();
+    var cur=crawlCurrentItem();
+    if(cur&&cur.id===it.id)await crawlLoadComments(cur);
+  }catch(e){
+    toast('检查失败：'+e.message,'err');
+  }finally{
+    btn.disabled=false;btn.textContent=label;
+  }
 }
 
 /* 媒体：只列清单，点开走 /api/media 读共享库的 blob（视频直接浏览器播放/下载）。 */

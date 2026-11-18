@@ -26,7 +26,7 @@ crawl 选项:
   --sort latest            搜索排序（取值见 mediacrawl platforms <平台>）
   --comments               同时采一级评论
   --sub-comments           同时采二级评论（楼中楼）
-  --max-comments 20        每条作品 / 每条评论最多采多少条（0 = 不限，热门视频会很慢）
+  --max-comments 0         每条作品 / 每条评论最多采多少条（0 = 不限，默认；热门视频会很慢）
   --media                  下载图片 / 视频（共享模式按 sha256 只存一份）
   --save jsonl             json | jsonl | csv | sqlite
   --out ./data             输出目录（断点续爬状态也存在这里）

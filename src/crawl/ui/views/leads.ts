@@ -58,6 +58,7 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
 .leads-body.leads-busy{opacity:.55;pointer-events:none}
 
 .leads-tbl{table-layout:fixed;width:100%}
+.leads-new{margin-right:4px;padding:0 5px;font-size:11px;vertical-align:1px}
 .leads-tbl col.leads-c1{width:36px}
 .leads-tbl col.leads-c2{width:140px}
 .leads-tbl col.leads-c4{width:120px}
@@ -567,16 +568,24 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
       ?('<a href="'+esc(profile)+'" target="_blank" rel="noopener">'+esc(who||profile)+'</a>')
       :(who?esc(who):'<span class="tiny">无</span>');
     var full=leadsHl(lead.text||'',leadsState.hl);
+    var kws=(lead.keywords||[]).filter(Boolean);
     return '<div class="leads-dt">'+
       '<p class="leads-full">'+(full||'（空）')+'</p>'+
       '<div class="leads-dl">'+
         '<div><span class="tiny">平台</span> <b>'+esc(leadsPlatformName(lead.platform))+'</b></div>'+
         '<div><span class="tiny">作品</span> '+item+'</div>'+
         '<div><span class="tiny">作者主页</span> '+author+'</div>'+
+        '<div><span class="tiny">关键词</span> '+(kws.length?esc(kws.join(' / ')):'<span class="tiny">—</span>')+'</div>'+
         '<div><span class="tiny">评论时间</span> <span class="num">'+esc(fmtTime(lead.created_at)||'未知')+'</span></div>'+
-        '<div><span class="tiny">采集时间</span> <span class="num">'+esc(fmtTime(lead.collected_at)||'未知')+'</span></div>'+
+        '<div><span class="tiny">首次采集</span> <span class="num">'+esc(fmtTime(lead.first_collected_at||lead.collected_at)||'未知')+'</span></div>'+
+        '<div><span class="tiny">最近更新</span> <span class="num">'+esc(fmtTime(lead.last_seen_at||lead.collected_at)||'未知')+'</span></div>'+
       '</div>'+
     '</div>';
+  }
+  function leadsIsNew(lead){
+    var at=lead.first_collected_at||lead.collected_at;
+    var ms=at?Date.parse(at):0;
+    return Boolean(ms&&Date.now()-ms<7*24*3600*1000);
   }
   function leadsRowHtml(lead){
     var id=String(lead.id||'');
@@ -588,7 +597,7 @@ mark.leads-hl{background:var(--acc-soft);color:var(--acc-ink);padding:0 2px;bord
     var tokens=leadsState.hl;
     var cells=[
       '<td class="leads-c-sel" data-label="选择"><input type="checkbox" class="leads-pick" data-id="'+esc(id)+'"'+picked+' aria-label="选中 '+esc(name)+'"></td>',
-      '<td class="leads-ell" data-label="评论者" title="'+esc(name)+'">'+leadsHl(name,tokens)+'</td>',
+      '<td class="leads-ell" data-label="评论者" title="'+esc(name)+'">'+(leadsIsNew(lead)?'<span class="badge ok leads-new">新</span>':'')+leadsHl(name,tokens)+'</td>',
       '<td class="leads-ell" data-label="评论" title="'+esc(text)+'">'+leadsHl(text,tokens)+'</td>',
       '<td class="leads-c-ct" data-label="联系方式" title="'+esc(contacts.title)+'"><div class="leads-ct">'+contacts.html+'</div></td>',
       '<td class="leads-ell" data-label="地域">'+(lead.province?esc(lead.province):'<span class="tiny">—</span>')+'</td>',

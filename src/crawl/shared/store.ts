@@ -8,7 +8,7 @@ import { sha256Hex } from '../../core/hash.js'
 import { DB_FILE, openDatabase } from './db.js'
 import type {
   BlobRef, CommentsState, ContentStore, FetchLogEntry, GcPlan, ItemBody, MediaRow,
-  PutItemOptions, RefRow, SharedItem, StoreUsage, CommentRecord,
+  PutItemOptions, RefRow, RefKeywordRow, SharedItem, StoreUsage, CommentRecord,
 } from './types.js'
 
 const itemRow = (raw: Record<string, unknown>): SharedItem => ({
@@ -307,7 +307,30 @@ class Store implements ContentStore {
         keyword = COALESCE(excluded.keyword, refs.keyword),
         account = COALESCE(excluded.account, refs.account)
     `).run(platform, itemId, user, at, at, meta.jobId ?? null, meta.keyword ?? null, meta.account ?? null)
+    if (meta.keyword) {
+      this.statement(`
+        INSERT INTO ref_keywords(platform, item_id, user, keyword, first_at, last_at, job_id) VALUES(?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(platform, item_id, user, keyword) DO UPDATE SET
+          last_at = excluded.last_at,
+          job_id = COALESCE(excluded.job_id, ref_keywords.job_id)
+      `).run(platform, itemId, user, meta.keyword, at, at, meta.jobId ?? null)
+    }
     this.bump()
+  }
+
+  listRefKeywords(user: string, platform?: string): RefKeywordRow[] {
+    const rows = platform
+      ? this.statement('SELECT * FROM ref_keywords WHERE user = ? AND platform = ? ORDER BY last_at DESC').all(user, platform)
+      : this.statement('SELECT * FROM ref_keywords WHERE user = ? ORDER BY last_at DESC').all(user)
+    return (rows as Array<Record<string, unknown>>).map((row) => ({
+      platform: String(row.platform),
+      itemId: String(row.item_id),
+      user: String(row.user),
+      keyword: String(row.keyword),
+      firstAt: Number(row.first_at),
+      lastAt: Number(row.last_at),
+      jobId: row.job_id == null ? null : String(row.job_id),
+    }))
   }
 
   listRefs(user: string, platform?: string): RefRow[] {
@@ -337,6 +360,7 @@ class Store implements ContentStore {
   }
 
   clearRefs(user: string): number {
+    this.statement('DELETE FROM ref_keywords WHERE user = ?').run(user)
     const result = this.statement('DELETE FROM refs WHERE user = ?').run(user)
     this.bump()
     return Number(result.changes)
